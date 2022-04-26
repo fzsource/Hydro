@@ -1,5 +1,5 @@
-import SockJS from 'sockjs-client';
 import $ from 'jquery';
+import WebSocket from 'reconnecting-websocket';
 import Notification from 'vj/components/notification/index';
 import i18n from 'vj/utils/i18n';
 import tpl from 'vj/utils/tpl';
@@ -23,44 +23,38 @@ function remove() {
 
 export default class Sock {
   constructor(url, showNotification = true, useShared = false) {
-    this.url = url;
+    const _url = new URL(url, window.location.href);
+    _url.protocol = window.location.protocol === 'https' ? 'wss' : 'ws';
+    this.url = _url.toString();
     this.shared = false;
-    this.isreconnect = false;
-    this.retryCount = 0;
     if (useShared && window.SharedWorker) this.initShared();
     else this.init();
     this.showNotification = showNotification;
   }
 
-  onauth() {
-    remove();
-    this.retryCount = 0;
-    if (this.onopen) this.onopen(this.sock);
+  get closed() {
+    return this.sock?.readyState === WebSocket.CLOSED;
   }
 
   init() {
-    this.sock = new SockJS(this.url);
-    // SockJS wouldn't send cookie. hack.
-    this.sock.onopen = () => this.send(document.cookie);
+    this.sock = new WebSocket(this.url);
     this.sock.onclose = ({ code, reason }) => {
-      this.retryCount++;
       console.warn('Connection closed, ', code, reason);
-      if (code >= 4000) this.closed = true;
-      if (!this.closed) {
-        this.isreconnect = setTimeout(this.init.bind(this), 3000);
-      }
-      if (this.showNotification && this.retryCount > 3) create();
+      if (code >= 4000) this.close();
+      else if (this.showNotification) create();
       if (this.onclose) this.onclose(code, reason);
     };
     this.sock.onmessage = (message) => {
       if (process.env.NODE_ENV !== 'production') console.log('Sock.onmessage: ', message);
       const msg = JSON.parse(message.data);
-      if (msg.event === 'auth') {
-        if (msg.error === 'PermissionError' || msg.error === 'PrivilegeError') {
-          if (this.showNotification) Notification.info(i18n('Connect fail: Permission denied.'));
-          this.closed = true;
-        } else this.onauth();
+      if (['PermissionError', 'PrivilegeError'].includes(msg.error)) {
+        if (this.showNotification) Notification.info(i18n('Connect fail: Permission denied.'));
+        this.close();
       } else if (this.onmessage) this.onmessage(message);
+    };
+    this.sock.onopen = () => {
+      remove();
+      if (this.onopen) this.onopen(this.sock);
     };
   }
 
@@ -68,8 +62,7 @@ export default class Sock {
     this.shared = true;
     const worker = new SharedWorker('/sharedworker.js', { name: 'Hydro Shared Connections Worker' });
     worker.port.start();
-    const path = `${new URL(this.url, window.location.href).href.replace('http', 'ws')}/websocket`;
-    worker.port.postMessage({ type: 'sharedConn', path, cookie: document.cookie });
+    worker.port.postMessage({ type: 'sharedConn', path: this.url, cookie: document.cookie });
     worker.port.onmessage = (e) => {
       if (e.data.type === 'message') this.onmessage({ data: e.data.payload });
     };
@@ -82,7 +75,6 @@ export default class Sock {
   }
 
   close() {
-    this.closed = true;
     if (!this.shared) this.sock.close();
   }
 }
