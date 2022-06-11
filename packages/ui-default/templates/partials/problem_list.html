@@ -6,7 +6,7 @@
 {% if not pdocs.length %}
   {{ nothing.render('Sorry, there is no problem in the problem set') }}
 {% else %}
-  {{ paginator.render(page, ppcount, position='top', add_qs=qs) }}
+  {{ paginator.render(page, ppcount, position='top', add_qs=('q=' + qs if qs else '')) }}
   <table class="data-table hide-problem-tag">
     <colgroup>
       <col class="col--checkbox display-mode-hide">
@@ -49,7 +49,7 @@
         <td class="col--pid display-mode-hide">{{ pdoc.docId }}</td>
         {% if handler.user.hasPriv(PRIV.PRIV_USER_PROFILE) %}
           {% if psdoc['rid'] %}
-            {{ record.render_status_td(psdoc, rid_key='rid', class="edit-mode-hide", allDomain=pdoc.domainId!==handler.domainId) }}
+            {{ record.render_status_td(psdoc, rid_key='rid', class="edit-mode-hide", allDomain=pdoc.domainId!==handler.args.domainId) }}
           {% else %}
             <td class="col--status record-status--border edit-mode-hide"></td>
           {% endif %}
@@ -73,6 +73,6 @@
     {%- endfor -%}
     </tbody>
   </table>
-  {{ paginator.render(page, ppcount, add_qs=qs) }}
+  {{ paginator.render(page, ppcount, add_qs=('q=' + qs if qs else '')) }}
 {% endif %}
 </div>

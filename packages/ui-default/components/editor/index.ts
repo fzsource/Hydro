@@ -25,6 +25,10 @@ export const config = {
     math: {
       inlineDigit: true,
     },
+    theme: {
+      // eslint-disable-next-line no-template-curly-in-string
+      path: `${UiContext.cdn_prefix}vditor/dist/css/content-theme`,
+    },
   },
 };
 
@@ -81,7 +85,7 @@ export default class Editor extends DOMAttachedObject {
       ? monaco.editor.getModel(monaco.Uri.parse(model))
       || monaco.editor.createModel(value, language === 'auto' ? undefined : language, monaco.Uri.parse(model))
       : model;
-    this.model.setValue(value);
+    if (!this.options.model) this.model.setValue(value);
     const cfg: import('../monaco').default.editor.IStandaloneEditorConstructionOptions = {
       theme,
       lineNumbers: 'on',
@@ -265,6 +269,8 @@ export default class Editor extends DOMAttachedObject {
 
   focus() {
     this.ensureValid();
+    this.vditor?.focus();
+    if (!this.editor || !this.model) return;
     this.editor.focus();
     const range = this.model.getFullModelRange();
     this.editor.setPosition({ lineNumber: range.endLineNumber, column: range.endColumn });

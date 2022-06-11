@@ -86,6 +86,7 @@ Attend Contest: 参加比赛
 Attend contests: 参加比赛
 Attended: 已参加
 author: 作者
+Auto Read Tasks: 自动识别任务
 Be Copied: 被复制
 Begin at: 开始于
 Begin Date: 开始日期
@@ -117,6 +118,8 @@ Change Email: 修改电子邮件
 Change Password: 修改密码
 Change Theme: 切换主题
 Check In: 签到
+Checker: 比较器
+CheckerType: 比较器类型
 Chinese: 中文
 Choose the background image in your profile page.: 选择您资料页面的背景图片。
 Claim homework: 认领作业
@@ -138,6 +141,7 @@ Compile Error: 编译错误
 Compilers' Version and Parameters: 编译器版本及参数
 Complete: 完成
 Completed: 已完成
+Config: 配置
 Confirm deleting the selected roles?: 您确定删除所选角色吗？
 Confirm deleting this comment? Its replies will be deleted as well.: 确认删除这个评论吗？回复会被同时删除。
 Confirm deleting this reply?: 确认删除这个回复吗？
@@ -268,6 +272,7 @@ domain: 域
 Domain: 域
 Don't have an account?: 还没有账户？
 Done: 已结束
+Download All: 下载全部
 Download Dataset: 下载数据集
 Download Selected: 下载选中
 Download: 下载
@@ -318,7 +323,10 @@ Export as CSV: 导出为 CSV
 Export as HTML: 导出为 HTML
 Extension (days): 最长延期 (日)
 Extension Score Penalty: 延期递交扣分规则
+Extra Files Config: 额外文件设置
 Failed to join the domain. You are already a member.: 加入域失败，您已是该域的成员。
+Failed to parse subtask.: 无法解析子任务信息。
+Failed to parse testcase.: 无法解析测试点信息。
 Feedback: 反馈
 Field {0} or {1} validation failed.: 字段 {0} 或 {1} 验证失败。
 Field {0} validation failed.: 字段 {0} 验证失败。
@@ -382,6 +390,7 @@ Host: 主持人
 hour(s): 小时
 If enabled, source code will be emailed to you after the submission is accepted.: 如果启用，在您通过题目后，源代码会以 Email 的形式发送给您。
 If left blank, the built-in template of the corresponding language will be used.: 若留空，则将使用对应语言的内置代码模板。
+Ignore trailing space and enter.: 忽略行末空格与文件尾回车。
 Images With Size: 指定大小的图片
 Images: 图片
 Import from: 导入自
@@ -400,6 +409,7 @@ Information: 信息
 Initialize: 初始化
 Inline codes: 行内代码
 Inline formulas: 行内公式
+Input: 输入
 Insert Code: 插入代码
 Insert Image: 插入图像
 Installed Modules: 已安装的模块
@@ -414,12 +424,16 @@ Is rated: 计入排名
 It works!: 它成了！
 Italic: 斜体
 Join: 加入
+Judge Config: 评测设置
 Judge Status: 评测状态
+judge_extra_files: 评测额外文件
 judge_playground: 评测游乐场
 Judged At: 评测时间
 Judged By: 评测机
 Judging Queue: 评测队列
 Keep current expiration: 保持当前过期设置
+Langs Config: 语言设置
+langs: 语言
 Language: 语言
 last active at: 最后活动于
 last login at: 最后登录于
@@ -531,6 +545,7 @@ Or, with automatically filled invitation code: 或者，这是可以自动填写
 Ordered List: 有序列表
 Original Score: 原始分数
 OS Info: 系统信息
+Output: 输出
 Over {0} problems: 超过 {0} 道题目
 Owner: 所有者
 page.problem_detail.sidebar.show_category: 点击显示
@@ -582,6 +597,8 @@ Problem Solution List: 题解列表
 Problem Solution: 题解列表
 Problem Tags Visibility: 题目标签可见性
 Problem Tags: 题目标签
+Problem Type: 题目类型
+problem_config: 评测设置
 problem_create: 创建题目
 problem_edit: 编辑题目
 problem_import: 导入题目
@@ -755,6 +772,7 @@ SuperUser: 超级管理员
 Support: 支持
 Switch account: 切换账户
 Tags: 标签
+Task Settings: 任务设置
 tasks_list: 任务列表
 Technical Information: 技术信息
 Temporary session: 临时会话
@@ -784,6 +802,7 @@ This message will be presented to those whose submissions are accepted.: 这条�
 This page needs JavaScript to work.: 这个页面需要 Javascript。
 This section cannot be challenged at present, so please complete the following sections first: 该章节目前不可挑战，请先完成以下章节
 This type of files are not allowed to be uploaded.: 不允许上传这种文件。
+This user was banned.: 此用户已被封禁。
 Time (Seconds): 耗时 (秒)
 Time Cost: 耗时
 Time Extension: 延期
@@ -811,9 +830,11 @@ Uncompleted: 未完成
 Unique: 唯一
 Unknown field {0}.: 未知字段 {0}。
 Unknown: 未知
+Unlimited: 无限制
 Unordered List: 无序列表
 Unstar Topic: 取消收藏
 Unstar: 取消收藏
+Unsupported configure this type of problem. Please refer to the documentation.: 暂不支持快捷配置此类题目。请参照文档操作。
 Update Permission: 更新权限
 Update Settings: 更新设置
 Update: 更新
@@ -830,12 +851,14 @@ Usage exceeded.: 用量超限。
 Use admin specificed: 由管理员指定
 Use algorithm calculated: 使用算法计算
 Use average of above: 使用上面的平均值
+Use Subtasks Mode: 使用子任务模式
 User {0} already exists.: 用户 {0} 已存在。
 User {0} not found.: 用户 {0} 不存在。
 User can join this domain by visiting the following URL: 用户可以访问此链接来加入此域
 User ID: 用户 ID
 User will no longer be allowed to join the domain after expiration.: 过期后，用户将不能加入此域。
 user_detail: 用户
+user_extra_files: 编译额外文件
 user_login: 登录
 user_logout: 登出
 user_lostpass: 忘记密码
