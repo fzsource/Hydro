@@ -28,6 +28,7 @@ function judgeCase(c: NormalizedCase, sid: string) {
             ctx.next({
                 case: {
                     status: STATUS.STATUS_CANCELED,
+                    subtaskId: ctxSubtask.subtask.id,
                     score: 0,
                     time: 0,
                     memory: 0,
@@ -148,7 +149,7 @@ function judgeSubtask(subtask: NormalizedSubtask, sid: string) {
         };
         const cases = [];
         for (const cid in subtask.cases) {
-            const runner = judgeCase(subtask.cases[cid], sid);
+            const runner = judgeCase(subtask.cases[cid], subtask.id.toString() ?? sid);
             cases.push(ctx.queue.add(() => runner(ctx, ctxSubtask, runner)));
         }
         await Promise.all(cases).catch((e) => {
