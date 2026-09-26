@@ -1,86 +1,45 @@
-import crypto from 'crypto';
-import { EventEmitter } from 'events';
 import path from 'path';
-import fs from 'fs-extra';
-import _ from 'lodash';
 import { parse } from 'shell-quote';
-import { sleep } from '@hydrooj/utils/lib/utils';
+import { CompilableSource } from '@hydrooj/common';
+import { fs } from '@hydrooj/utils';
 import { FormatError } from './error';
 
-const EMPTY_STR = /^[ \r\n\t]*$/i;
+const EMPTY_STR = /^[ \r\n\t]*$/;
 
 export const cmd = parse;
 
-export function parseFilename(filePath: string) {
-    const t = filePath.split('/');
-    return t[t.length - 1];
-}
-
-const encrypt = (algorithm: string, content: crypto.BinaryLike) => {
-    const hash = crypto.createHash(algorithm);
-    hash.update(content);
-    return hash.digest('hex');
-};
-
-export const md5 = (content: string) => encrypt('md5', content);
-
-export class Queue<T> extends EventEmitter {
-    queue: T[] = [];
-    waiting: any[] = [];
-
-    get(count = 1) {
-        if (this.queue.length < count) {
-            return new Promise<T[]>((resolve) => {
-                this.waiting.push({ count, resolve });
-            });
-        }
-        const items = [];
-        for (let i = 0; i < count; i++) items.push(this.queue[i]);
-        this.queue = _.drop(this.queue, count);
-        return items as T[];
-    }
-
-    push(value: T) {
-        this.queue.push(value);
-        if (this.waiting.length && this.waiting[0].count <= this.queue.length) {
-            const items = [];
-            for (let i = 0; i < this.waiting[0].count; i++) items.push(this.queue[i]);
-            this.queue = _.drop(this.queue, this.waiting[0].count);
-            this.waiting[0].resolve(items);
-            this.waiting.shift();
-        }
-    }
-}
-
 export namespace Lock {
-    const data = {};
+    const queue: Record<string, Array<(res?: any) => void>> = {};
 
     export async function acquire(key: string) {
-        // eslint-disable-next-line no-await-in-loop
-        while (data[key]) await sleep(100);
-        data[key] = true;
+        if (!queue[key]) {
+            queue[key] = [];
+        } else {
+            await new Promise((resolve) => {
+                queue[key].push(resolve);
+            });
+        }
     }
 
     export function release(key: string) {
-        data[key] = false;
+        if (!queue[key].length) delete queue[key];
+        else queue[key].shift()();
     }
 }
 
-export function compilerText(stdout: string, stderr: string) {
-    const ret = [];
-    if (!EMPTY_STR.test(stdout)) ret.push(stdout.substring(0, 1024 * 1024));
-    if (!EMPTY_STR.test(stderr)) ret.push(stderr.substring(0, 1024 * 1024));
-    return ret.join('\n');
+export function compilerText(...messages: string[]) {
+    return messages.filter((i) => !EMPTY_STR.test(i)).map((i) => i.substring(0, 1024 * 1024)).join('\n');
 }
 
-export function restrictFile(p: string) {
+function restrictFile(p: string) {
     if (!p) return '/';
     if (p[0] === '/') p = '';
-    return p.replace(/\.\./gmi, '');
+    return p.replace(/\.\./g, '');
 }
 
 export function ensureFile(folder: string) {
-    return (file: string, message: string) => {
+    return (src: CompilableSource, message: string) => {
+        const file = typeof src === 'string' ? src : src?.file;
         if (file === '/dev/null') return file;
         // Historical issue
         if (file.includes('/')) {

@@ -1,63 +1,35 @@
 import { omit } from 'lodash';
-import moment from 'moment';
-import { FilterQuery, ObjectID } from 'mongodb';
+import { Filter, ObjectId } from 'mongodb';
+import { Context } from '../context';
 import { DiscussionNodeNotFoundError, DocumentNotFoundError } from '../error';
-import { DiscussionReplyDoc, DiscussionTailReplyDoc, Document } from '../interface';
-import * as bus from '../service/bus';
+import {
+    DiscussionHistoryDoc, DiscussionReplyDoc, DiscussionTailReplyDoc, Document,
+} from '../interface';
+import bus from '../service/bus';
+import db from '../service/db';
 import { NumberKeys } from '../typeutils';
 import { buildProjection } from '../utils';
+import { PERM } from './builtin';
 import * as contest from './contest';
 import * as document from './document';
 import problem from './problem';
-import TaskModel from './task';
 import * as training from './training';
+import { User } from './user';
 
 export interface DiscussionDoc extends Document { }
-export namespace DiscussionDoc {
-    export type Field = keyof DiscussionDoc;
-    export const fields: Field[] = [];
-    type Getter = () => Partial<DiscussionDoc>;
-    const getters: Getter[] = [];
-    export function extend(getter: Getter) {
-        getters.push(getter);
-        fields.push(...Object.keys(getter()) as any);
-    }
+export type Field = keyof DiscussionDoc;
 
-    extend(() => ({
-        _id: new ObjectID(),
-        domainId: 'system',
-        docType: document.TYPE_DISCUSSION,
-        docId: new ObjectID(),
-        owner: 1,
-        title: '*',
-        content: '',
-        parentId: new ObjectID(),
-        ip: '1.1.1.1',
-        pin: false,
-        highlight: false,
-        updateAt: new Date(),
-        nReply: 0,
-        views: 0,
-        history: [],
-    }));
-
-    export function create() {
-        const result = {} as DiscussionDoc;
-        for (const getter of getters) {
-            Object.assign(result, getter());
-        }
-        return result;
-    }
-}
-
-export const PROJECTION_LIST: DiscussionDoc.Field[] = [
+export const PROJECTION_LIST: Field[] = [
     '_id', 'domainId', 'docType', 'docId', 'highlight',
     'nReply', 'views', 'pin', 'updateAt', 'owner',
-    'parentId', 'parentType', 'title',
+    'parentId', 'parentType', 'title', 'hidden',
 ];
-export const PROJECTION_PUBLIC: DiscussionDoc.Field[] = [
-    ...PROJECTION_LIST, 'content', 'history', 'react', 'maintainer',
+export const PROJECTION_PUBLIC: Field[] = [
+    ...PROJECTION_LIST, 'content', 'edited', 'react', 'maintainer',
     'lock',
+];
+export const HISTORY_PROJECTION_PUBLIC: (keyof DiscussionHistoryDoc)[] = [
+    'title', 'content', 'docId', 'uid', 'time',
 ];
 
 export const typeDisplay = {
@@ -65,18 +37,21 @@ export const typeDisplay = {
     [document.TYPE_CONTEST]: 'contest',
     [document.TYPE_DISCUSSION_NODE]: 'node',
     [document.TYPE_TRAINING]: 'training',
-    [document.TYPE_HOMEWORK]: 'homework',
 };
 
+export const coll = db.collection('discussion.history');
+
 export async function add(
-    domainId: string, parentType: number, parentId: ObjectID | number | string,
+    domainId: string, parentType: number, parentId: ObjectId | number | string,
     owner: number, title: string, content: string,
-    ip: string | null = null, highlight: boolean, pin: boolean,
-): Promise<ObjectID> {
+    ip: string | null = null, highlight: boolean, pin: boolean, hidden = false,
+): Promise<ObjectId> {
+    const time = new Date();
     const payload: Partial<DiscussionDoc> = {
         domainId,
         content,
         owner,
+        editor: owner,
         parentType,
         parentId,
         title,
@@ -84,101 +59,125 @@ export async function add(
         nReply: 0,
         highlight,
         pin,
-        updateAt: new Date(),
+        updateAt: time,
         views: 0,
         sort: 100,
+        hidden,
     };
-    await bus.serial('discussion/before-add', payload);
+    await bus.parallel('discussion/before-add', payload);
     const res = await document.add(
         payload.domainId!, payload.content!, payload.owner!, document.TYPE_DISCUSSION,
         null, payload.parentType, payload.parentId, omit(payload, ['domainId', 'content', 'owner', 'parentType', 'parentId']),
     );
+    await coll.insertOne({
+        domainId, docId: res, content, uid: owner, ip, time: new Date(),
+    });
     payload.docId = res;
-    await bus.emit('discussion/add', payload);
+    await bus.parallel('discussion/add', payload);
     return payload.docId;
 }
 
-export async function get<T extends DiscussionDoc.Field>(
-    domainId: string, did: ObjectID, projection: T[] = PROJECTION_PUBLIC as any,
+export async function get<T extends Field>(
+    domainId: string, did: ObjectId, projection: T[] = PROJECTION_PUBLIC as any,
 ): Promise<Pick<DiscussionDoc, T>> {
     return await document.get(domainId, document.TYPE_DISCUSSION, did, projection);
 }
 
-export function edit(domainId: string, did: ObjectID, $set: Partial<DiscussionDoc>) {
+export async function edit(domainId: string, did: ObjectId, $set: Partial<DiscussionDoc>) {
+    if ($set.content) {
+        await coll.insertOne({
+            domainId, docId: did, content: $set.content, uid: $set.editor, ip: $set.ip, time: new Date(),
+        });
+    }
     return document.set(domainId, document.TYPE_DISCUSSION, did, $set);
 }
 
 export function inc(
-    domainId: string, did: ObjectID, key: NumberKeys<DiscussionDoc>, value: number,
+    domainId: string, did: ObjectId, key: NumberKeys<DiscussionDoc>, value: number,
 ): Promise<DiscussionDoc | null> {
     return document.inc(domainId, document.TYPE_DISCUSSION, did, key, value);
 }
 
-export function del(domainId: string, did: ObjectID): Promise<never> {
-    return Promise.all([
+export async function del(domainId: string, did: ObjectId): Promise<void> {
+    const [ddoc, drdocs] = await Promise.all([
+        document.get(domainId, document.TYPE_DISCUSSION, did),
+        document.getMulti(domainId, document.TYPE_DISCUSSION_REPLY, {
+            parentType: document.TYPE_DISCUSSION, parentId: did,
+        }).project({ _id: 1, 'reply._id': 1 }).toArray(),
+    ]) as any;
+    await Promise.all([
         document.deleteOne(domainId, document.TYPE_DISCUSSION, did),
         document.deleteMulti(domainId, document.TYPE_DISCUSSION_REPLY, {
             parentType: document.TYPE_DISCUSSION, parentId: did,
         }),
         document.deleteMultiStatus(domainId, document.TYPE_DISCUSSION, { docId: did }),
+        coll.deleteMany({ domainId, docId: { $in: [ddoc._id, ...(drdocs.reply?.map((i) => i._id) || [])] } }),
     ]) as any;
 }
 
-export function count(domainId: string, query: FilterQuery<DiscussionDoc>) {
+export function count(domainId: string, query: Filter<DiscussionDoc>) {
     return document.count(domainId, document.TYPE_DISCUSSION, query);
 }
 
-export function getMulti(domainId: string, query: FilterQuery<DiscussionDoc> = {}, projection = PROJECTION_LIST) {
+export function getMulti(domainId: string, query: Filter<DiscussionDoc> = {}, projection = PROJECTION_LIST) {
     return document.getMulti(domainId, document.TYPE_DISCUSSION, query)
-        .sort({ pin: -1, sort: -1 })
-        .project(buildProjection(projection));
+        .sort({ pin: -1, docId: -1 })
+        .project<DiscussionDoc>(buildProjection(projection));
 }
 
 export async function addReply(
-    domainId: string, did: ObjectID, owner: number,
+    domainId: string, did: ObjectId, owner: number,
     content: string, ip: string,
-): Promise<ObjectID> {
+): Promise<ObjectId> {
+    const time = new Date();
     const [drid] = await Promise.all([
         document.add(
             domainId, content, owner, document.TYPE_DISCUSSION_REPLY,
-            null, document.TYPE_DISCUSSION, did, { ip },
+            null, document.TYPE_DISCUSSION, did, { ip, editor: owner },
         ),
-        document.incAndSet(domainId, document.TYPE_DISCUSSION, did, 'nReply', 1, { updateAt: new Date() }),
+        document.incAndSet(domainId, document.TYPE_DISCUSSION, did, 'nReply', 1, { updateAt: time }),
     ]);
+    await coll.insertOne({
+        domainId, docId: drid, content, uid: owner, ip, time,
+    });
     return drid;
 }
 
-export function getReply(domainId: string, drid: ObjectID): Promise<DiscussionReplyDoc | null> {
+export function getReply(domainId: string, drid: ObjectId): Promise<DiscussionReplyDoc | null> {
     return document.get(domainId, document.TYPE_DISCUSSION_REPLY, drid);
 }
 
 export async function editReply(
-    domainId: string, drid: ObjectID, content: string,
+    domainId: string, drid: ObjectId, content: string, uid: number, ip: string,
 ): Promise<DiscussionReplyDoc | null> {
-    return document.set(domainId, document.TYPE_DISCUSSION_REPLY, drid, { content });
+    await coll.insertOne({
+        domainId, docId: drid, content, uid, ip, time: new Date(),
+    });
+    return document.set(domainId, document.TYPE_DISCUSSION_REPLY, drid, { content, edited: true, editor: uid });
 }
 
-export async function delReply(domainId: string, drid: ObjectID) {
+export async function delReply(domainId: string, drid: ObjectId) {
     const drdoc = await getReply(domainId, drid);
     if (!drdoc) throw new DocumentNotFoundError(domainId, drid);
     return await Promise.all([
         document.deleteOne(domainId, document.TYPE_DISCUSSION_REPLY, drid),
         document.inc(domainId, document.TYPE_DISCUSSION, drdoc.parentId, 'nReply', -1),
+        coll.deleteMany({ domainId, docId: { $in: [drid, ...(drdoc.reply?.map((i) => i._id) || [])] } }),
     ]);
 }
 
-export function getMultiReply(domainId: string, did: ObjectID) {
+export function getMultiReply(domainId: string, did: ObjectId) {
     return document.getMulti(
         domainId, document.TYPE_DISCUSSION_REPLY,
         { parentType: document.TYPE_DISCUSSION, parentId: did },
     ).sort('_id', -1);
 }
 
-export function getListReply(domainId: string, did: ObjectID): Promise<DiscussionReplyDoc[]> {
+export function getListReply(domainId: string, did: ObjectId): Promise<DiscussionReplyDoc[]> {
     return getMultiReply(domainId, did).toArray();
 }
 
-export async function react(domainId: string, docType: keyof document.DocType, did: ObjectID, id: string, uid: number, reverse = false) {
+export async function react(domainId: string, docType: keyof document.DocType, did: ObjectId, id: string, uid: number, reverse = false) {
     let doc;
     const sdoc = await document.setIfNotStatus(domainId, docType, did, uid, `react.${id}`, reverse ? 0 : 1, reverse ? 0 : 1, {});
     if (sdoc) doc = await document.inc(domainId, docType, did, `react.${id}`, reverse ? -1 : 1);
@@ -186,51 +185,76 @@ export async function react(domainId: string, docType: keyof document.DocType, d
     return [doc, sdoc];
 }
 
-export async function getReaction(domainId: string, docType: keyof document.DocType, did: ObjectID, uid: number) {
+export async function getReaction(domainId: string, docType: keyof document.DocType, did: ObjectId, uid: number) {
     const doc = await document.getStatus(domainId, docType, did, uid);
     return doc?.react || {};
 }
 
 export async function addTailReply(
-    domainId: string, drid: ObjectID,
+    domainId: string, drid: ObjectId,
     owner: number, content: string, ip: string,
-): Promise<[DiscussionReplyDoc, ObjectID]> {
+): Promise<[DiscussionReplyDoc, ObjectId]> {
+    const time = new Date();
     const [drdoc, subId] = await document.push(
         domainId, document.TYPE_DISCUSSION_REPLY, drid,
-        'reply', content, owner, { ip },
+        'reply', content, owner, { ip, editor: owner },
     );
-    await document.set(
-        domainId, document.TYPE_DISCUSSION, drdoc.parentId,
-        { updateAt: new Date() },
-    );
+    await Promise.all([
+        coll.insertOne({
+            domainId, docId: subId, content, uid: owner, ip, time: new Date(),
+        }),
+        document.set(
+            domainId, document.TYPE_DISCUSSION, drdoc.parentId,
+            { updateAt: time },
+        ),
+    ]);
     return [drdoc, subId];
 }
 
 export function getTailReply(
-    domainId: string, drid: ObjectID, drrid: ObjectID,
+    domainId: string, drid: ObjectId, drrid: ObjectId,
 ): Promise<[DiscussionReplyDoc, DiscussionTailReplyDoc] | [null, null]> {
     return document.getSub(domainId, document.TYPE_DISCUSSION_REPLY, drid, 'reply', drrid);
 }
 
-export function editTailReply(
-    domainId: string, drid: ObjectID, drrid: ObjectID, content: string,
+export async function editTailReply(
+    domainId: string, drid: ObjectId, drrid: ObjectId, content: string, uid: number, ip: string,
 ): Promise<DiscussionTailReplyDoc> {
-    return document.setSub(domainId, document.TYPE_DISCUSSION_REPLY, drid, 'reply', drrid, { content });
+    const [, drrdoc] = await Promise.all([
+        coll.insertOne({
+            domainId, docId: drrid, content, uid, time: new Date(), ip,
+        }),
+        document.setSub(domainId, document.TYPE_DISCUSSION_REPLY, drid,
+            'reply', drrid, { content, edited: true, editor: uid }),
+    ]);
+    return drrdoc;
 }
 
-export async function delTailReply(domainId: string, drid: ObjectID, drrid: ObjectID) {
-    return document.deleteSub(domainId, document.TYPE_DISCUSSION_REPLY, drid, 'reply', drrid);
+export async function delTailReply(domainId: string, drid: ObjectId, drrid: ObjectId) {
+    return Promise.all([
+        document.deleteSub(domainId, document.TYPE_DISCUSSION_REPLY, drid, 'reply', drrid),
+        coll.deleteMany({ domainId, docId: drrid }),
+    ]);
 }
 
-export function setStar(domainId: string, did: ObjectID, uid: number, star: boolean) {
+export function getHistory(
+    domainId: string, docId: ObjectId, query: Filter<DiscussionHistoryDoc> = {},
+    projection = HISTORY_PROJECTION_PUBLIC,
+) {
+    return coll.find({ domainId, docId, ...query })
+        .sort({ time: -1 }).project(buildProjection(projection))
+        .toArray();
+}
+
+export function setStar(domainId: string, did: ObjectId, uid: number, star: boolean) {
     return document.setStatus(domainId, document.TYPE_DISCUSSION, did, uid, { star });
 }
 
-export function getStatus(domainId: string, did: ObjectID, uid: number) {
+export function getStatus(domainId: string, did: ObjectId, uid: number) {
     return document.getStatus(domainId, document.TYPE_DISCUSSION, did, uid);
 }
 
-export function setStatus(domainId: string, did: ObjectID, uid: number, $set) {
+export function setStatus(domainId: string, did: ObjectId, uid: number, $set) {
     return document.setStatus(domainId, document.TYPE_DISCUSSION, did, uid, $set);
 }
 
@@ -251,27 +275,31 @@ export function flushNodes(domainId: string) {
 
 export async function getVnode(domainId: string, type: number, id: string, uid?: number) {
     if (type === document.TYPE_PROBLEM) {
-        let pdoc = await problem.get(domainId, Number.isSafeInteger(+id) ? +id : id, problem.PROJECTION_LIST);
-        if (!pdoc) throw new DiscussionNodeNotFoundError(id);
-        if (pdoc.hidden) pdoc = problem.default;
+        const pdoc = await problem.get(domainId, Number.isSafeInteger(+id) ? +id : id, problem.PROJECTION_LIST);
+        if (!pdoc) throw new DiscussionNodeNotFoundError(domainId, `problem/${id}`);
         return { ...pdoc, type, id: pdoc.docId };
     }
-    if ([document.TYPE_CONTEST, document.TYPE_TRAINING, document.TYPE_HOMEWORK].includes(type as any)) {
+    if ([document.TYPE_CONTEST, document.TYPE_TRAINING].includes(type as any)) {
         const model = type === document.TYPE_TRAINING ? training : contest;
-        const _id = new ObjectID(id);
+        const typeName = type === document.TYPE_TRAINING ? 'training' : 'contest';
+        if (!ObjectId.isValid(id)) throw new DiscussionNodeNotFoundError(domainId, `${typeName}/${id}`);
+        const _id = new ObjectId(id);
         const tdoc = await model.get(domainId, _id);
-        if (!tdoc) throw new DiscussionNodeNotFoundError(id);
+        if (!tdoc) throw new DiscussionNodeNotFoundError(domainId, `${typeName}/${id}`);
         if (uid) {
             const tsdoc = await model.getStatus(domainId, _id, uid);
             tdoc.attend = tsdoc?.attend || tsdoc?.enroll;
         }
-        return { ...tdoc, type, id: _id };
+        return {
+            ...tdoc, type, id: _id, hidden: false,
+        };
     }
     return {
         title: id,
         ...await getNode(domainId, id),
         type,
         id,
+        owner: 1,
     };
 }
 
@@ -283,66 +311,58 @@ export async function getListVnodes(domainId: string, ddocs: any, getHidden = fa
     const res = {};
     async function task(ddoc: DiscussionDoc) {
         const vnode = await getVnode(domainId, ddoc.parentType, ddoc.parentId.toString());
-        if (!res[ddoc.parentType]) res[ddoc.parentType] = {};
+        res[ddoc.parentType] ||= {};
         if (!getHidden && vnode.hidden) return;
-        if (vnode.assign?.length && Set.intersection(vnode.assign, assign).size) return;
+        if (vnode.assign?.length && new Set(vnode.assign).intersection(new Set(assign)).size) return;
         res[ddoc.parentType][ddoc.parentId] = vnode;
     }
     await Promise.all(ddocs.map((ddoc) => task(ddoc)));
     return res;
 }
 
-bus.on('problem/delete', async (domainId, docId) => {
-    const dids = await document.getMulti(
-        domainId, document.TYPE_DISCUSSION,
-        { parentType: document.TYPE_PROBLEM, parentId: docId },
-    ).project({ docId: 1 }).map((ddoc) => ddoc.docId).toArray();
-    const drids = await document.getMulti(
-        domainId, document.TYPE_DISCUSSION_REPLY,
-        { parentType: document.TYPE_DISCUSSION, parentId: { $in: dids } },
-    ).project({ docId: 1 }).map((drdoc) => drdoc.docId).toArray();
-    return await Promise.all([
-        document.deleteMultiStatus(domainId, document.TYPE_DISCUSSION, { docId: { $in: dids } }),
-        document.deleteMulti(domainId, document.TYPE_DISCUSSION, { docId: { $in: dids } }),
-        document.deleteMulti(domainId, document.TYPE_DISCUSSION_REPLY, { docId: { $in: drids } }),
-    ]);
-});
-
-const t = Math.exp(-0.15);
-
-async function updateSort() {
-    const cursor = document.coll.find({ docType: document.TYPE_DISCUSSION });
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-        // eslint-disable-next-line no-await-in-loop
-        const data = await cursor.next();
-        if (!data) return;
-        // eslint-disable-next-line no-await-in-loop
-        const rCount = await getMultiReply(data.domainId, data.docId).count();
-        const sort = ((data.sort || 100) + Math.max(rCount - (data.lastRCount || 0), 0) * 10) * t;
-        // eslint-disable-next-line no-await-in-loop
-        await document.coll.updateOne({ _id: data._id }, { $set: { sort, lastRCount: rCount } });
+export function checkVNodeVisibility(type: number, vnode: any, user: User) {
+    if (type === document.TYPE_PROBLEM) {
+        if (vnode.hidden && !user.own(vnode) && !user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN)) return false;
     }
+    if ([document.TYPE_CONTEST, document.TYPE_TRAINING].includes(type as any)) {
+        if (!user.own(vnode) && vnode.assign?.length && !new Set(vnode.assign).intersection(new Set(user.group)).size) return false;
+    }
+    return true;
 }
-TaskModel.Worker.addHandler('discussion.sort', updateSort);
 
-bus.once('app/started', async () => {
-    if (!await TaskModel.count({ type: 'schedule', subType: 'discussion.sort' })) {
-        await TaskModel.add({
-            type: 'schedule',
-            subType: 'discussion.sort',
-            executeAfter: moment().minute(0).second(0).millisecond(0).toDate(),
-            interval: [1, 'hour'],
-        });
-    }
-});
+export function apply(ctx: Context) {
+    ctx.on('problem/delete', async (domainId, docId) => {
+        const dids = await document.getMulti(
+            domainId, document.TYPE_DISCUSSION,
+            { parentType: document.TYPE_PROBLEM, parentId: docId },
+        ).project({ docId: 1 }).map((ddoc) => ddoc.docId).toArray();
+        const drids = await document.getMulti(
+            domainId, document.TYPE_DISCUSSION_REPLY,
+            { parentType: document.TYPE_DISCUSSION, parentId: { $in: dids } },
+        ).project({ docId: 1 }).map((drdoc) => drdoc.docId).toArray();
+        return await Promise.all([
+            document.deleteMultiStatus(domainId, document.TYPE_DISCUSSION, { docId: { $in: dids } }),
+            document.deleteMulti(domainId, document.TYPE_DISCUSSION, { docId: { $in: dids } }),
+            document.deleteMulti(domainId, document.TYPE_DISCUSSION_REPLY, { docId: { $in: drids } }),
+        ]);
+    });
+    ctx.on('problem/edit', async (result) => {
+        const dids = await document.getMulti(
+            result.domainId, document.TYPE_DISCUSSION,
+            { parentType: document.TYPE_PROBLEM, parentId: result.docId },
+        ).project({ docId: 1 }).map((ddoc) => ddoc.docId).toArray();
+        return await document.coll.updateMany({ _id: { $in: dids } }, { $set: { hidden: result.hidden } });
+    });
+}
 
 global.Hydro.model.discussion = {
+    coll,
     typeDisplay,
-    DiscussionDoc,
     PROJECTION_LIST,
     PROJECTION_PUBLIC,
+    HISTORY_PROJECTION_PUBLIC,
 
+    apply,
     add,
     get,
     inc,
@@ -362,6 +382,7 @@ global.Hydro.model.discussion = {
     delTailReply,
     react,
     getReaction,
+    getHistory,
     setStar,
     getStatus,
     setStatus,
@@ -371,4 +392,5 @@ global.Hydro.model.discussion = {
     getNodes,
     getVnode,
     getListVnodes,
+    checkVNodeVisibility,
 };

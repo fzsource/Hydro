@@ -1,17 +1,24 @@
 import codeforces from './codeforces';
-import luogu from './luogu';
+import csgoj from './csgoj';
+import hduoj from './hduoj';
+import {
+    HUSTOJ as hustoj,
+    XJOI as xjoi,
+} from './hustoj';
 import poj from './poj';
 import spoj from './spoj';
 import uoj from './uoj';
-
-declare module 'hydrooj/src/interface' {
-    interface HydroGlobal {
-        vjudge: typeof vjudge;
-    }
-}
+import yacs from './yacs';
 
 const vjudge: Record<string, any> = {
-    codeforces, luogu, poj, spoj, uoj,
+    codeforces,
+    csgoj,
+    poj,
+    spoj,
+    uoj,
+    hustoj,
+    xjoi,
+    hduoj,
+    yacs,
 };
-global.Hydro.vjudge = vjudge;
-export = vjudge;
+export default vjudge;

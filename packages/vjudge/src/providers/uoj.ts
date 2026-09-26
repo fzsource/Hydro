@@ -1,16 +1,13 @@
 /* eslint-disable no-await-in-loop */
 import { PassThrough } from 'stream';
 import { JSDOM } from 'jsdom';
-import * as superagent from 'superagent';
-import proxy from 'superagent-proxy';
-import { STATUS } from '@hydrooj/utils/lib/status';
-import { parseMemoryMB, parseTimeMS, sleep } from '@hydrooj/utils/lib/utils';
-import { Logger } from 'hydrooj/src/logger';
-import * as setting from 'hydrooj/src/model/setting';
+import {
+    Logger, parseMemoryMB, parseTimeMS, randomstring, sleep, STATUS,
+} from 'hydrooj';
+import { BasicFetcher } from '../fetch';
 import { IBasicProvider, RemoteAccount } from '../interface';
 import { VERDICT } from '../verdict';
 
-proxy(superagent as any);
 const logger = new Logger('remote/uoj');
 const MAPPING = {
     一: 1,
@@ -25,44 +22,29 @@ const MAPPING = {
     十: 10,
 };
 
-export default class UOJProvider implements IBasicProvider {
+export default class UOJProvider extends BasicFetcher implements IBasicProvider {
     constructor(public account: RemoteAccount, private save: (data: any) => Promise<void>) {
-        if (account.cookie) this.cookie = account.cookie;
+        // UOJ WAF start blocking vjudge User-Agent
+        super(account, 'https://uoj.ac', 'form', logger, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            },
+        });
     }
 
-    cookie: string[] = [];
     csrf: string;
-
-    get(url: string) {
-        logger.debug('get', url);
-        if (!url.includes('//')) url = `${this.account.endpoint || 'https://uoj.ac'}${url}`;
-        const req = superagent.get(url).set('Cookie', this.cookie);
-        if (this.account.proxy) return req.proxy(this.account.proxy);
-        return req;
-    }
-
-    post(url: string) {
-        logger.debug('post', url, this.cookie);
-        if (!url.includes('//')) url = `${this.account.endpoint || 'https://uoj.ac'}${url}`;
-        const req = superagent.post(url).set('Cookie', this.cookie).type('form');
-        if (this.account.proxy) return req.proxy(this.account.proxy);
-        return req;
-    }
 
     async getCsrfToken(url: string) {
         const { text: html, header } = await this.get(url);
-        if (header['set-cookie']) {
-            await this.save({ cookie: header['set-cookie'] });
-            this.cookie = header['set-cookie'];
-        }
-        let value = /_token *: *"(.+?)"/g.exec(html);
-        if (value) return value?.[1];
-        value = /_token" value="(.+?)"/g.exec(html);
+        if (header['set-cookie']) await this.setCookie(header['set-cookie'], true);
+        let value = /_token *: *"(.+?)"/.exec(html);
+        if (value) return value[1];
+        value = /_token" value="(.+?)"/.exec(html);
         return value?.[1];
     }
 
     get loggedIn() {
-        return this.get('/login').then(({ text: html }) => !html.includes('<title>登录 - Universal Online Judge</title>'));
+        return this.get('/login').then(({ text: html }) => !html.includes('<title>登录 - '));
     }
 
     async ensureLogin() {
@@ -78,9 +60,10 @@ export default class UOJProvider implements IBasicProvider {
                 password: this.account.password,
             });
         if (header['set-cookie'] && this.cookie.length === 1) {
-            header['set-cookie'].push(...this.cookie);
-            await this.save({ cookie: header['set-cookie'] });
-            this.cookie = header['set-cookie'];
+            const cookie = Array.isArray(header['set-cookie']) ? header['set-cookie'] : [header['set-cookie']];
+            cookie.push(...this.cookie);
+            await this.save({ cookie });
+            this.cookie = cookie;
         }
         if (text === 'ok') return true;
         return text;
@@ -91,15 +74,15 @@ export default class UOJProvider implements IBasicProvider {
         const res = await this.get(`/problem/${id.split('P')[1]}`);
         const { window: { document } } = new JSDOM(res.text);
         const files = {};
-        document.querySelectorAll('article>img[src]').forEach((ele) => {
+        for (const ele of document.querySelectorAll('article>img[src]')) {
             const src = ele.getAttribute('src');
-            if (!src.startsWith('http')) return;
+            if (!src.startsWith('http')) continue;
             const file = new PassThrough();
             this.get(src).pipe(file);
-            const fid = String.random(8);
+            const fid = randomstring(8);
             files[`${fid}.png`] = file;
             ele.setAttribute('src', `file://${fid}.png`);
-        });
+        }
         const contentNode = document.querySelector('article');
         const titles = contentNode.querySelectorAll('h3');
         for (const title of titles) {
@@ -153,8 +136,7 @@ export default class UOJProvider implements IBasicProvider {
         };
     }
 
-    async listProblem(page: number, resync = false) {
-        if (resync && page > 1) return [];
+    async listProblem(page: number) {
         const { text } = await this.get(`/problems?page=${page}`);
         const $dom = new JSDOM(text);
         const index = $dom.window.document.querySelector('ul.pagination>li.active>a').innerHTML;
@@ -162,15 +144,9 @@ export default class UOJProvider implements IBasicProvider {
         return Array.from($dom.window.document.querySelectorAll('tbody>tr>td>a')).map((i) => `P${i.getAttribute('href').split('/')[4]}`);
     }
 
-    async submitProblem(id: string, lang: string, code: string, info) {
+    async submitProblem(id: string, lang: string, code: string) {
         let programTypeId = lang.includes('uoj.') ? lang.split('uoj.')[1] : 'C++11';
         if (programTypeId === 'Python27') programTypeId = 'Python2.7';
-        const comment = setting.langs[lang].comment;
-        if (comment) {
-            const msg = `Hydro submission #${info.rid}@${new Date().getTime()}`;
-            if (typeof comment === 'string') code = `${comment} ${msg}\n${code}`;
-            else if (comment instanceof Array) code = `${comment[0]} ${msg} ${comment[1]}\n${code}`;
-        }
         const _token = await this.getCsrfToken(`/problem/${id.split('P')[1]}`);
         const { text } = await this.post(`/problem/${id.split('P')[1]}`).send({
             _token,
@@ -189,7 +165,6 @@ export default class UOJProvider implements IBasicProvider {
     async waitForSubmission(id: string, next, end) {
         let i = 1;
         let count = 0;
-        // eslint-disable-next-line no-constant-condition
         while (count < 120) {
             count++;
             await sleep(3000);
@@ -218,6 +193,8 @@ export default class UOJProvider implements IBasicProvider {
                     await next({
                         status: STATUS.STATUS_JUDGING,
                         case: {
+                            id: i,
+                            subtaskId: 1,
                             status: VERDICT[info.children[2]?.innerHTML?.trim().toUpperCase()] || STATUS.STATUS_WRONG_ANSWER,
                             time: parseTimeMS(info.children[3]?.innerHTML?.split('time: ')?.[1] || 0),
                             memory: parseMemoryMB(info.children[4]?.innerHTML?.split('memory: ')?.[1] || 0) * 1024,
@@ -240,6 +217,8 @@ export default class UOJProvider implements IBasicProvider {
                         await next({
                             status: STATUS.STATUS_JUDGING,
                             case: {
+                                id: i,
+                                subtaskId,
                                 status: VERDICT[info.children[2]?.innerHTML?.trim().toUpperCase()] || STATUS.STATUS_WRONG_ANSWER,
                                 time: parseTimeMS(info.children[3]?.innerHTML?.split('time: ')?.[1] || 0),
                                 memory: parseMemoryMB(info.children[4]?.innerHTML?.split('memory: ')?.[1] || 0) * 1024,
@@ -252,7 +231,7 @@ export default class UOJProvider implements IBasicProvider {
                 }
             }
             if (document.querySelector('tbody').innerHTML.includes('Judging')) continue;
-            // eslint-disable-next-line no-unsafe-optional-chaining
+
             const score = +summary.children[3]?.children[0]?.innerHTML || 0;
             const status = score === 100 ? STATUS.STATUS_ACCEPTED : STATUS.STATUS_WRONG_ANSWER;
             return await end({

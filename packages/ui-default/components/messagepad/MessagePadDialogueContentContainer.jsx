@@ -1,11 +1,11 @@
+import 'jquery.easing';
+
+import $ from 'jquery';
+import moment from 'moment';
 import React from 'react';
 import { connect } from 'react-redux';
 import TimeAgo from 'timeago-react';
-import moment from 'moment';
-import 'jquery-scroll-lock';
-import 'jquery.easing';
-import i18n from 'vj/utils/i18n';
-import { parse as parseMongoId } from 'vj/utils/mongoId';
+import { i18n, mongoId } from 'vj/utils';
 import Message from './MessageComponent';
 
 const mapStateToProps = (state) => ({
@@ -16,20 +16,18 @@ const mapStateToProps = (state) => ({
 });
 
 export default connect(mapStateToProps)(class MessagePadDialogueContentContainer extends React.PureComponent {
-  componentDidMount() {
-    $(this.refs.list).scrollLock({ strict: true });
-  }
-
   componentDidUpdate(prevProps) {
-    const node = this.refs.list;
+    const node = this.state.ref;
+
     if (this.props.activeId !== prevProps.activeId) {
       this.scrollToBottom = true;
       this.scrollWithAnimation = false;
-    } else if (node.scrollTop + node.offsetHeight === node.scrollHeight) {
+    } else if (Math.abs(node.scrollTop + node.offsetHeight - node.scrollHeight) < 200) {
       this.scrollToBottom = true;
       this.scrollWithAnimation = true;
     } else this.scrollToBottom = false;
 
+    if (!node) return;
     if (this.scrollToBottom) {
       const targetScrollTop = node.scrollHeight - node.offsetHeight;
       if (this.scrollWithAnimation) {
@@ -46,9 +44,9 @@ export default connect(mapStateToProps)(class MessagePadDialogueContentContainer
       // Is system message
       try {
         const data = JSON.parse(msg.content);
-        const str = i18n(data.message).replace(/\{([^{}]+)\}/g, (match, key) => `%substitude%${key}%substitude%`);
-        const arr = str.split('%substitude%');
-        data.params = data.params || {};
+        const str = i18n(data.message).replace(/\{([^{}]+)\}/g, (match, key) => `%placeholder%${key}%placeholder%`);
+        const arr = str.split('%placeholder%');
+        data.params ||= {};
         for (let i = 1; i < arr.length; i += 2) {
           if (arr[i].endsWith(':link')) {
             const link = data.params[arr[i].split(':link')[0]];
@@ -67,7 +65,9 @@ export default connect(mapStateToProps)(class MessagePadDialogueContentContainer
 
   renderInner() {
     if (this.props.activeId === null) return [];
-    return this.props.item.messages.map((msg) => (
+    const sorted = this.props.item.messages
+      .sort((msg1, msg2) => mongoId(msg1._id).timestamp - mongoId(msg2._id).timestamp);
+    return sorted.map((msg) => (
       <Message
         key={msg._id}
         isSelf={msg.from === UserContext._id}
@@ -78,8 +78,8 @@ export default connect(mapStateToProps)(class MessagePadDialogueContentContainer
         }
       >
         <div>{this.renderContent(msg)}</div>
-        <time data-tooltip={moment(parseMongoId(msg._id).timestamp * 1000).format('YYYY-MM-DD HH:mm:ss')}>
-          <TimeAgo datetime={parseMongoId(msg._id).timestamp * 1000} locale={i18n('timeago_locale')} />
+        <time data-tooltip={moment(mongoId(msg._id).timestamp * 1000).format('YYYY-MM-DD HH:mm:ss')}>
+          <TimeAgo datetime={mongoId(msg._id).timestamp * 1000} locale={i18n('timeago_locale')} />
         </time>
       </Message>
     ));
@@ -87,9 +87,18 @@ export default connect(mapStateToProps)(class MessagePadDialogueContentContainer
 
   render() {
     return (
-      <ol className="messagepad__content" ref="list">
-        {this.renderInner()}
-      </ol>
+      <>
+        <div className="messagepad__header">
+          {this.props.item && (
+            <a className="messagepad__content__header__title" href={`/user/${this.props.item.udoc._id}`}>
+              {`${this.props.item.udoc.uname}(UID: ${this.props.item.udoc._id})`}
+            </a>
+          )}
+        </div>
+        <ol className="messagepad__content" style={{ overscrollBehavior: 'contain' }} ref={(ref) => { this.setState({ ...this.state, ref }); }}>
+          {this.renderInner()}
+        </ol>
+      </>
     );
   }
 });

@@ -1,18 +1,9 @@
 {
     "name": "@hydrooj/login-with-google",
-    "version": "0.1.0",
-    "main": "package.json",
-    "repository": "git@github.com:hydro-dev/Hydro.git",
+    "version": "0.3.0",
+    "main": "index.ts",
+    "repository": "https://github.com/hydro-dev/Hydro",
     "author": "undefined <i@undefined.moe>",
     "license": "AGPL-3.0-or-later",
-    "preferUnplugged": true,
-    "devDependencies": {
-        "@types/superagent": "^4.1.15"
-    },
-    "peerDependencies": {
-        "hydrooj": "*"
-    },
-    "dependencies": {
-        "superagent": "^7.1.3"
-    }
+    "preferUnplugged": true
 }

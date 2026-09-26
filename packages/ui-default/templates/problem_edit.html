@@ -6,12 +6,6 @@
       <div class="section__body">
         <form method="post">
           <div class="row">
-            <div class="medium-7 columns">
-              <label>
-                {{ _('Title') }}
-                <input name="title" placeholder="{{ _('title') }}" value="{{ pdoc['title']|default('') }}" class="textbox"{% if page_name == 'problem_create' %} autofocus{% endif %}>
-              </label>
-            </div>
             <div class="medium-3 columns">
               <label>
                 {{ _('pid') }}
@@ -21,11 +15,17 @@
                 </label>
               </label>
             </div>
+            <div class="medium-7 columns">
+              <label>
+                {{ _('Title') }}
+                <input name="title" placeholder="{{ _('title') }}" value="{{ pdoc['title']|default('') }}" class="textbox"{% if page_name == 'problem_create' %} autofocus{% endif %}>
+              </label>
+            </div>
             <div class="medium-2 columns">
               <label>
                 <br>
                 <label class="checkbox">
-                  <input type="checkbox" name="hidden" value="on"{% if pdoc['hidden'] %} checked{% endif %}>{{ _('Hidden') }}
+                  <input type="checkbox" name="hidden" value="on"{% if pdoc['hidden'] %} checked{% endif %} class="checkbox">{{ _('Hidden') }}
                 </label>
               </label>
             </div>
@@ -33,7 +33,7 @@
           <div class="row">
           {{ form.form_text({
                row:false,
-               columns:6,
+               columns:9,
                label:'Tags',
                help_text:'Split by \', \'.',
                name:'tag',
@@ -42,36 +42,25 @@
           {{ form.form_text({
                row:false,
                columns:3,
-               label:'Assign',
-               placeholder:_('Group / UID'),
-               name:'assign',
-               value:pdoc.assign|default([])|join(', ')
-             }) }}
-          {{ form.form_text({
-               row:false,
-               columns:3,
                label:'Difficulty',
                help_text:'From 1-10',
                name:'difficulty',
-               value:pdoc['difficulty']
+               value:pdoc['difficulty'] or ''
              }) }}
           </div>
           <div class="section__tab-container nojs--hide">
           <div class="section__tab-header-wrapper">
             <ul class="section__tab-header">
               <li class="section__tab-header-item tab--active" data-lang="{{ _('__id') }}">{{ _('__langname') }}</li>
-              {% for k, v in model.setting.SETTINGS_BY_KEY['viewLang'].range %}
-                {% if k != handler.user.viewLang %}
-                  <li class="section__tab-header-item" data-lang="{{ k }}">{{ v }}</li>
-                {% endif %}
-              {% endfor %}
+              {% for k, v in statementLangs %}{% if k != handler.user.viewLang %}
+                <li class="section__tab-header-item" data-lang="{{ k }}">{{ v }}</li>
+              {% endif %}{% endfor %}
             </ul>
           </div>
           </div>
           <div><textarea data-editor{% if page_name == 'problem_edit' %} autofocus{% endif %} class="textbox auto-resize nojs--hide"></textarea></div>
           <textarea name="content" class="textbox hasjs--hide" data-markdown-upload style="height: 500px">{% if pdoc %}{{ pdoc['content']|toString }}{% else %}{% include 'partials/problem_default.md' %}{% endif %}</textarea>
           <div class="row"><div class="columns">
-            <input type="hidden" name="csrfToken" value="{{ handler.csrfToken }}">
           {% if page_name == 'problem_edit' %}
             <button type="submit" class="rounded primary button">
               {{ _('Update') }}
@@ -101,8 +90,18 @@
       </div>
     </div>
     {% if page_name == 'problem_edit' %}
-      {% include "partials/problem_sidebar_additional_file.html" %}
-      {% set owner_udoc = udoc %}
+      <div class="section side" data-type="additional_file" data-sidebar>
+        <div class="section__header">
+          <h1 class="section__title">{{_('Additional Files')}}</h1>
+          <div class="section__tools">
+            <button class="primary rounded button" name="upload_file">{{ _('Upload') }}</button>
+          </div>
+        </div>
+        {% set sidebar = true %}
+        {% set can_edit = true %}
+        {% set filetype = "additional_file" %}
+        {% include "partials/problem_files.html" %}
+      </div>
       {% include "partials/problem_sidebar.html" %}
     {% else %}
       {% include 'components/md_hint.html' %}

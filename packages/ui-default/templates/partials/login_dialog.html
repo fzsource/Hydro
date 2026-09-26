@@ -1,5 +1,6 @@
 <div class="dialog dialog--signin" style="display:none">
   <div class="dialog__content">
+    {% if model.system.get('server.login') and handler.user.hasPriv(PRIV.PRIV_REGISTER_USER) %}
     <div class="dialog--signin__bg">
       <div class="dialog--signin__side">
         <h1>{{ _("Don't have an account?") }}</h1>
@@ -7,6 +8,7 @@
         <div><a href="{{ url('user_register') }}" class="inverse rounded button">{{ _('Sign Up Now') }}</a></div>
       </div>
     </div>
+    {% endif %}
     <div class="dialog--signin__main">
       <form action="{{ url('user_login') }}" method="post">
         <div class="dialog--signin__close-container supplementary">
@@ -18,7 +20,7 @@
         <div class="row"><div class="columns">
           <label class="material textbox">
             {{ _('Username') }}
-            <input name="uname" type="text" data-autofocus>
+            <input name="uname" type="text" data-autofocus autocomplete="username webauthn">
           </label>
         </div></div>
         <div class="row"><div class="columns">
@@ -27,25 +29,20 @@
             <input name="password" type="password">
           </label>
         </div></div>
-        <div class="row" style="display: none" id="tfa_div"><div class="columns">
-          <label class="material textbox">
-            {{ _('Two Factor Authentication Code') }}
-            <input name="tfa" type="number">
-          </label>
-        </div></div>
         <div class="row"><div class="columns">
           <label class="checkbox">
-            <input type="checkbox" name="rememberme">{{ _('Remember me') }}
+            <input type="checkbox" name="rememberme" class="checkbox">{{ _('Remember me') }}
           </label>
         </div></div>
-        <input type="hidden" name="csrfToken" value="{{ handler.csrfToken }}">
         <div class="row"><div class="columns">
-          <input type="submit" value="{{ _('Sign In') }}" class="expanded rounded primary button">
+          <input type="hidden" name="tfa" value="">
+          <input type="hidden" name="authnChallenge" value="">
+          <input type="submit" value="{{ _('Login') }}" name="login_submit" class="expanded rounded primary button">
         </div></div>
         {% endif %}
-        {%- for v in handler.loginMethods -%}
+        {%- for v in loginMethods|default(handler.loginMethods) -%}
         <div class="row"><div class="columns">
-          <a href="{{ url('user_oauth', type=v.id) }}" class="expanded rounded button">{{ _(v.text) }}</a>
+          <a href="{{ url('user_oauth', type=v.id, query={redirect: handler.request.path}) }}" class="expanded rounded button">{{ _(v.text) }}</a>
         </div></div>
         {%- endfor -%}
         <div class="row"><div class="columns">

@@ -1,4 +1,6 @@
 __langname: English
+'File IO: {0}': 'File IO: {0}'
+'Tip: You are entering sudo mode.': 'Tip: You are entering <a href="https://docs.github.com/articles/sudo-mode">sudo mode</a>.'
 Can be Extended For: Extension
 Current Status: Status
 Handled Requests: Req
@@ -19,14 +21,15 @@ perm_problem_solution: Problem Solutions
 perm_problem: Problems
 perm_record: Records
 perm_training: Trainings
+preferredPrefix_hint: This is used for re-organizing problem IDs. For example, if the ID of the problem in the problemset are P1001, P1002, P1003, and you set "T" in this option, those problem will be imported with ID T1001, T1002 and T1003.
 problem_create: Problem Create
 problem_edit: Problem Edit
 problem_import: Import Problem
 problem_main: Problem Set
 problem_solution: Problem Solution
 problem_submit: Problem Submit
+problem_type.communication: 'Type: Communication'
 problem_type.default: 'Type: Default'
-problem_type.fileio: 'Type: FileIO ({0})'
 problem_type.interactive: 'Type: Interactive'
 problem_type.objective: 'Type: Objective'
 problem_type.remote_judge: 'Type: RemoteJudge'
@@ -52,6 +55,8 @@ setting_info: Personal Info
 setting_preference: Preference
 setting_privacy: Privacy
 setting_usage: Usage Preference
+sort::default: Default
+sort::recent: Recent
 tasks_list: Task list
 timeago_locale: en_US
 training_create: Training Create
@@ -63,3 +68,4 @@ user_logout: Logout
 user_lostpass: Lost Password
 user_register: Register
 wiki_help: Help
+You can also upload your avatar to Gravatar and it will be automatically updated here.: You can also upload your avatar to <a href="https://gravatar.com/">Gravatar</a> and it will be automatically updated here.

@@ -1,11 +1,13 @@
-import React from 'react';
-import type { editor } from 'monaco-editor';
-import { connect } from 'react-redux';
-import { load } from 'vj/components/monaco/loader';
-import Editor from 'vj/components/editor';
-import { diffLines } from 'diff';
-import yaml from 'js-yaml';
 import type { ProblemConfigFile, TestCaseConfig } from 'hydrooj/src/interface';
+import { diffLines } from 'diff';
+import $ from 'jquery';
+import * as yaml from 'js-yaml';
+import { isEqual } from 'lodash';
+import type { editor } from 'monaco-editor';
+import React from 'react';
+import { connect } from 'react-redux';
+import Editor from 'vj/components/editor';
+import { load } from 'vj/components/monaco/loader';
 
 const mapStateToProps = (state) => ({
   config: state.config,
@@ -20,15 +22,16 @@ const mapDispatchToProps = (dispatch) => ({
 });
 
 interface Props {
-  config: object;
-  handleUpdateCode: Function;
+  config: any;
+  handleUpdateCode: (val: string) => void;
 }
 
 const configKey = [
   'type', 'subType', 'target', 'score', 'time',
   'memory', 'filename', 'checker_type', 'checker', 'interactor',
-  'user_extra_files', 'judge_extra_files', 'detail', 'outputs', 'redirect',
-  'cases', 'subtasks', 'langs',
+  'manager', 'num_processes', 'multi_pass', 'validator', 'user_extra_files',
+  'judge_extra_files', 'detail', 'outputs', 'redirect', 'cases',
+  'subtasks', 'langs', 'key', 'time_limit_rate', 'memory_limit_rate',
 ];
 
 const subtasksKey = [
@@ -47,6 +50,7 @@ export function configYamlFormat(config: ProblemConfigFile) {
       if (key === 'checker'
         && (['default', 'strict'].includes(formatConfig.checker_type) || !formatConfig.checker_type)) return;
       if (key === 'interactor' && config.type !== 'interactive') return;
+      if (key === 'multi_pass' && (!Number.isInteger(config.multi_pass) || config.multi_pass <= 1 || config.multi_pass > 20)) return;
       if (key === 'subtasks') {
         formatConfig[key] = [];
         config[key].forEach((subtask) => {
@@ -74,8 +78,8 @@ export function configYamlFormat(config: ProblemConfigFile) {
     }
   });
   if (formatConfig.type === 'objective') {
-    Object.keys(formatConfig).filter((i) => !['type', 'outputs'].includes(i)).forEach((i) => delete formatConfig[i]);
-    formatConfig.outputs = formatConfig.outputs || [];
+    Object.keys(formatConfig).filter((i) => !['type', 'answers'].includes(i)).forEach((i) => delete formatConfig[i]);
+    formatConfig.answers = config.answers || {};
   }
   Object.keys(formatConfig).filter((i) => i.startsWith('__')).forEach((i) => delete formatConfig[i]);
   return formatConfig;
@@ -84,8 +88,8 @@ export function configYamlFormat(config: ProblemConfigFile) {
 export default connect(mapStateToProps, mapDispatchToProps)(class MonacoEditor extends React.PureComponent<Props> {
   disposable = [];
   containerElement: HTMLElement;
-  private __preventUpdate = false;
-  private __preventFormat = false;
+  __preventUpdate = false;
+  __preventFormat = false;
 
   editor: editor.IStandaloneCodeEditor;
   model: editor.ITextModel;
@@ -94,10 +98,11 @@ export default connect(mapStateToProps, mapDispatchToProps)(class MonacoEditor e
   async componentDidMount() {
     const { monaco } = await load(['yaml']);
     const uri = monaco.Uri.parse('hydro://problem/file/config.yaml');
-    this.model = monaco.editor.createModel(yaml.dump(configYamlFormat(this.props.config)), 'yaml', uri);
+    this.model = monaco.editor.createModel(yaml.dump(configYamlFormat(this.props.config), { seqNoIndent: true }), 'yaml', uri);
     this.vjEditor = Editor.getOrConstruct($(this.containerElement), {
       language: 'yaml',
       model: this.model,
+      lineNumbers: 'off',
       onChange: (value: string) => {
         this.__preventUpdate = true;
         if (!this.__preventFormat) this.props.handleUpdateCode(value);
@@ -108,34 +113,38 @@ export default connect(mapStateToProps, mapDispatchToProps)(class MonacoEditor e
   }
 
   componentDidUpdate(prevProps) {
-    if (this.__preventUpdate || !this.model) return;
-    if (yaml.dump(prevProps.config) !== yaml.dump(this.props.config)) {
-      this.__preventFormat = true;
-      const curValue = this.model.getValue();
-      const diff = diffLines(curValue, yaml.dump(configYamlFormat(this.props.config)));
-      const ops = [];
-      let cursor = 1;
-      for (const line of diff) {
-        if (line.added) {
-          let range = this.model.getFullModelRange();
-          range = range.setStartPosition(cursor, 0);
-          range = range.setEndPosition(cursor, 0);
-          ops.push({ range, text: line.value });
-        } else if (line.removed) {
-          let range = this.model.getFullModelRange();
-          range = range.setStartPosition(cursor, 0);
-          cursor += line.count;
-          range = range.setEndPosition(cursor, 0);
-          ops.push({ range, text: '' });
-        } else cursor += line.count;
-      }
-      this.model.pushEditOperations([], ops, undefined);
-      this.__preventFormat = false;
+    if (this.__preventUpdate || !this.model || !this.props.config.__valid) return;
+    if (yaml.dump(prevProps.config, { seqNoIndent: true }) === yaml.dump(this.props.config, { seqNoIndent: true })) return;
+    const curValue = this.model.getValue();
+    const pending = configYamlFormat(this.props.config);
+    try {
+      const curConfig = yaml.load(curValue);
+      if (isEqual(curConfig, pending)) return;
+    } catch { }
+    this.__preventFormat = true;
+    const diff = diffLines(curValue, yaml.dump(pending, { seqNoIndent: true }));
+    const ops = [];
+    let cursor = 1;
+    for (const line of diff) {
+      if (line.added) {
+        let range = this.model.getFullModelRange();
+        range = range.setStartPosition(cursor, 0);
+        range = range.setEndPosition(cursor, 0);
+        ops.push({ range, text: line.value });
+      } else if (line.removed) {
+        let range = this.model.getFullModelRange();
+        range = range.setStartPosition(cursor, 0);
+        cursor += line.count;
+        range = range.setEndPosition(cursor, 0);
+        ops.push({ range, text: '' });
+      } else cursor += line.count;
     }
+    this.model.pushEditOperations([], ops, undefined);
+    this.__preventFormat = false;
   }
 
   componentWillUnmount() {
-    if (this.vjEditor) this.vjEditor.destory();
+    if (this.vjEditor) this.vjEditor.destroy();
     if (this.model) this.model.dispose();
     if (this.editor) this.editor.dispose();
     this.disposable.map((i) => i.dispose());
@@ -155,8 +164,7 @@ export default connect(mapStateToProps, mapDispatchToProps)(class MonacoEditor e
           width: '100%',
         }}
         className="ConfigMonacoEditor"
-      >
-      </div>
+      />
     );
   }
 });

@@ -1,8 +1,7 @@
+import $ from 'jquery';
+import { confirm } from 'vj/components/dialog';
 import { NamedPage } from 'vj/misc/Page';
-import { ConfirmDialog } from 'vj/components/dialog';
-import tpl from 'vj/utils/tpl';
-import i18n from 'vj/utils/i18n';
-import request from 'vj/utils/request';
+import { i18n, request } from 'vj/utils';
 
 export default new NamedPage('training_edit', () => {
   let confirmed = false;
@@ -13,11 +12,9 @@ export default new NamedPage('training_edit', () => {
         window.location.href = res.url;
       });
     }
-    const message = 'Confirm deleting this training? Its status will be deleted as well.';
-    return new ConfirmDialog({
-      $body: tpl.typoMsg(i18n(message)),
-    }).open().then((action) => {
-      if (action !== 'yes') return;
+    const message = 'Confirm deleting this training? Its files and status will be deleted as well.';
+    return confirm(i18n(message)).then((yes) => {
+      if (!yes) return;
       confirmed = true;
       ev.target.click();
     });

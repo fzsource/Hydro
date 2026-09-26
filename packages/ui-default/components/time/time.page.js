@@ -1,6 +1,7 @@
+import $ from 'jquery';
 import * as timeago from 'timeago.js';
 import { AutoloadPage } from 'vj/misc/Page';
-import i18n from 'vj/utils/i18n';
+import { i18n } from 'vj/utils';
 
 try {
   const locales = require.context('timeago.js/lib/lang', false, /\.js$/);
@@ -37,6 +38,7 @@ function cancelRelativeTime($container) {
 }
 
 const relativeTimePage = new AutoloadPage('relativeTimePage', () => {
+  if (!UserContext.showTimeAgo) return;
   runRelativeTime($('body'));
   $(document).on('vjContentNew', (e) => runRelativeTime($(e.target)));
   $(document).on('vjContentRemove', (e) => cancelRelativeTime($(e.target)));

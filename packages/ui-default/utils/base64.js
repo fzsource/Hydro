@@ -11,7 +11,7 @@ const Base64 = {
     let enc3;
     let enc4;
     let i = 0;
-    input = Base64._utf8_encode(input);
+    input = Base64._utf8Encode(input);
     while (i < input.length) {
       chr1 = input.charCodeAt(i++);
       chr2 = input.charCodeAt(i++);
@@ -23,8 +23,8 @@ const Base64 = {
       if (Number.isNaN(chr2)) enc3 = enc4 = 64;
       else if (Number.isNaN(chr3)) enc4 = 64;
       output = output
-                + this._keyStr.charAt(enc1) + this._keyStr.charAt(enc2)
-                + this._keyStr.charAt(enc3) + this._keyStr.charAt(enc4);
+        + this._keyStr.charAt(enc1) + this._keyStr.charAt(enc2)
+        + this._keyStr.charAt(enc3) + this._keyStr.charAt(enc4);
     }
     return output;
   },
@@ -52,11 +52,11 @@ const Base64 = {
       if (enc3 !== 64) output += String.fromCharCode(chr2);
       if (enc4 !== 64) output += String.fromCharCode(chr3);
     }
-    output = Base64._utf8_decode(output);
+    output = Base64._utf8Decode(output);
     return output;
   },
 
-  _utf8_encode(string) {
+  _utf8Encode(string) {
     string = string.replace(/\r\n/g, '\n');
     let utftext = '';
     for (let n = 0; n < string.length; n++) {
@@ -75,7 +75,7 @@ const Base64 = {
     return utftext;
   },
 
-  _utf8_decode(utftext) {
+  _utf8Decode(utftext) {
     let string = '';
     let i = 0;
     let c = 0;
@@ -102,4 +102,3 @@ const Base64 = {
 };
 
 export default Base64;
-window.Hydro.utils.base64 = Base64;

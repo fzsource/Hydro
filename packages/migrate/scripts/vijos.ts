@@ -1,18 +1,19 @@
-/* eslint-disable @typescript-eslint/naming-convention */
+/* eslint-disable ts/naming-convention */
 /* eslint-disable no-await-in-loop */
-import mongodb, { Cursor, Db } from 'mongodb';
+import mongodb, { Db, FindCursor } from 'mongodb';
 import {
-    DiscussionTailReplyDoc, MessageDoc, RecordDoc, TestCase, TrainingNode,
+    db as dst,
+    DiscussionModel, DiscussionTailReplyDoc, DocumentModel,
+    RecordDoc, TestCase, TrainingNode,
 } from 'hydrooj';
 
-const dst = global.Hydro.service.db;
-const { discussion } = global.Hydro.model;
 const map = {};
-
 const pid = (id) => {
     if (map[id.toString()]) return map[id.toString()];
     return id;
 };
+
+type Report = (args: { progress?: number, message?: string }) => void;
 
 const tasks = {
     user: async (doc) => ({
@@ -64,7 +65,6 @@ const tasks = {
                         content: r.content,
                         owner: r.owner_uid,
                         ip: r.ip,
-                        history: [],
                     };
                     res.push(drrdoc);
                 }
@@ -74,7 +74,7 @@ const tasks = {
         parent_doc_id: {
             field: 'parentId',
             processer: (parentId, doc) => {
-                if (doc.parent_doc_type === global.Hydro.model.document.TYPE_PROBLEM) {
+                if (doc.parent_doc_type === DocumentModel.TYPE_PROBLEM) {
                     return pid(parentId);
                 }
                 return parentId;
@@ -95,7 +95,7 @@ const tasks = {
             processer: (rule) => {
                 const n = {};
                 for (const key in rule) {
-                    n[parseInt(key, 10) / 3600] = rule;
+                    n[Number.parseInt(key, 10) / 3600] = rule;
                 }
                 return n;
             },
@@ -189,7 +189,7 @@ const tasks = {
         num_problems: 'nProblem',
         num_submit: 'nSubmit',
         num_accept: 'nAccept',
-        num_liked: 'nLike',
+        num_liked: 'nLiked',
         level: 'level',
         role: 'role',
         join_at: 'joinAt',
@@ -270,7 +270,7 @@ const tasks = {
     }),
 };
 
-type CursorGetter = (s: Db) => Cursor<any>;
+type CursorGetter = (s: Db) => FindCursor<any>;
 
 const cursor: NodeJS.Dict<CursorGetter> = {
     user: (s) => s.collection('user').find(),
@@ -284,8 +284,8 @@ const cursor: NodeJS.Dict<CursorGetter> = {
     file: (s) => s.collection('fs.files').find(),
 };
 
-async function discussionNode(src: Db, report: Function) {
-    const count = await src.collection('document').find({ doc_type: 20 }).count();
+async function discussionNode(src: Db, report: Report) {
+    const count = await src.collection('document').countDocuments({ doc_type: 20 });
     await report({ progress: 1, message: `discussion.node: ${count}` });
     const total = Math.floor(count / 5);
     for (let i = 0; i <= total; i++) {
@@ -299,11 +299,11 @@ async function discussionNode(src: Db, report: Function) {
                 const nodes = item[1];
                 for (const node of nodes || []) {
                     if (node.pic) {
-                        t.push(discussion.addNode(
+                        t.push(DiscussionModel.addNode(
                             doc.domain_id, node.name, category, { pic: node.pic },
                         ));
                     } else {
-                        t.push(discussion.addNode(doc.domain_id, node.name, category, {}));
+                        t.push(DiscussionModel.addNode(doc.domain_id, node.name, category, {}));
                     }
                 }
             }
@@ -329,8 +329,8 @@ async function fix(doc) {
     );
 }
 
-async function fixProblem(report: Function) {
-    const count = await dst.collection('document').find({ docType: 10 }).count();
+async function fixProblem(report: Report) {
+    const count = await dst.collection('document').countDocuments({ docType: 10 });
     await report({ progress: 1, message: `Fix pid: ${count}` });
     const total = Math.floor(count / 50);
     for (let i = 0; i <= total; i++) {
@@ -346,13 +346,13 @@ async function fixProblem(report: Function) {
 
 function objid(ts: Date) {
     const p = Math.floor(ts.getTime() / 1000).toString(16);
-    const id = new mongodb.ObjectID();
-    return new mongodb.ObjectID(p + id.toHexString().slice(8, 8 + 6 + 4 + 6));
+    const id = new mongodb.ObjectId();
+    return new mongodb.ObjectId(p + id.toHexString().slice(8, 8 + 6 + 4 + 6));
 }
 
 // FIXME this seems not working
-async function message(src: Db, report: Function) {
-    const count = await src.collection('message').find().count();
+async function message(src: Db, report: Report) {
+    const count = await src.collection('message').countDocuments();
     await report({ progress: 1, message: `Messages: ${count}` });
     const total = Math.floor(count / 50);
     for (let i = 0; i <= total; i++) {
@@ -361,23 +361,22 @@ async function message(src: Db, report: Function) {
             .toArray();
         for (const doc of docs) {
             for (const msg of doc.reply) {
-                const mdoc: MessageDoc = {
+                await dst.collection('message').insertOne({
                     _id: objid(msg.at),
                     from: msg.sender_uid,
                     to: msg.sender_uid === doc.sender_uid ? doc.sendee_uid : doc.sender_uid,
                     content: msg.content,
                     // Mark all as read
                     flag: 0,
-                };
-                await dst.collection('message').insertOne(mdoc);
+                });
             }
         }
         await report({ progress: Math.round(100 * ((i + 1) / (total + 1))) });
     }
 }
 
-async function removeInvalidPid(report: Function) {
-    const count = await dst.collection('document').find({ docType: 10 }).count();
+async function removeInvalidPid(report: Report) {
+    const count = await dst.collection('document').countDocuments({ docType: 10 });
     const bulk = dst.collection('document').initializeUnorderedBulkOp();
     await report({ progress: 1, message: `Remove pid: ${count}` });
     const total = Math.floor(count / 50);
@@ -386,7 +385,7 @@ async function removeInvalidPid(report: Function) {
             .find({ docType: 10 }).skip(i * 50).limit(50)
             .toArray();
         for (const doc of docs) {
-            const id = parseInt(doc.pid, 10);
+            const id = Number.parseInt(doc.pid, 10);
             if (Number.isSafeInteger(id)) {
                 bulk.find({ _id: doc._id }).updateOne({ $unset: { pid: '' } });
             }
@@ -395,13 +394,12 @@ async function removeInvalidPid(report: Function) {
     }
 }
 
-async function task(name: any, src: Db, report: Function) {
-    const count = await cursor[name](src).count();
-    await report({ progress: 1, message: `${name}: ${count}` });
-    const total = Math.floor(count / 50);
+async function task(name: any, src: Db, report: Report) {
+    await report({ progress: 1, message: `${name}` });
     let lastProgress = -1;
-    for (let i = 0; i <= total; i++) {
+    for (let i = 0; ; i++) {
         const docs = await cursor[name](src).skip(i * 50).limit(50).toArray();
+        if (!docs.length) break;
         const res = [];
         for (const doc of docs) {
             let d: any = {};
@@ -461,26 +459,23 @@ async function task(name: any, src: Db, report: Function) {
             }
         }
         await Promise.all(res).catch((e) => report({ message: `${e}\n${e.stack}` }));
-        const progress = Math.round(100 * ((i + 1) / (total + 1)));
-        if (progress > lastProgress) {
-            await report({ progress });
-            lastProgress = progress;
+        if (i > lastProgress) {
+            await report({ progress: i });
+            lastProgress = i;
         }
     }
 }
 
 export async function run({
     host = 'localhost', port = 27017, name = 'vijos4', username, password,
-}, report: Function) {
+}, report: Report) {
     let mongourl = 'mongodb://';
     if (username) mongourl += `${username}:${password}@`;
     mongourl += `${host}:${port}/${name}`;
-    const Database = await mongodb.MongoClient.connect(mongourl, {
-        useNewUrlParser: true, useUnifiedTopology: true,
-    });
+    const Database = await mongodb.MongoClient.connect(mongourl, {});
     const src = Database.db(name);
     await report({ progress: 0, message: 'Database connected.' });
-    const userCounter = await src.collection('system').findOne({ _id: 'user_counter' });
+    const userCounter = await src.collection<any>('system').findOne({ _id: 'user_counter' });
     if (!userCounter) {
         report({ message: 'No valid installation found' });
         return false;
@@ -505,10 +500,3 @@ export async function run({
     await global.Hydro.model.system.set('db.ver', 1);
     return true;
 }
-
-export const description = 'migrate from vijos';
-export const validate = {
-    host: 'string', port: 'number', name: 'string', username: 'string', password: 'string',
-};
-
-global.Hydro.script.migrateVijos = { run, description, validate };

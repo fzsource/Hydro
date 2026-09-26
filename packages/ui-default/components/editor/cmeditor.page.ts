@@ -1,5 +1,5 @@
 import { AutoloadPage } from 'vj/misc/Page';
-import delay from 'vj/utils/delay';
+import { delay } from 'vj/utils';
 import CmEditor from '.';
 
 function runSubstitute($container: JQuery<Document | HTMLElement>) {
@@ -7,7 +7,6 @@ function runSubstitute($container: JQuery<Document | HTMLElement>) {
     $container.find(`textarea[data-${language}]`).get().forEach((element) => {
       const config: any = { language };
       if ($(element).data('model')) config.model = $(element).data('model');
-      if ($(element).data('hide')) config.hide = $(element).data('hide');
       CmEditor.getOrConstruct($(element), config);
     });
   }

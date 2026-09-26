@@ -48,6 +48,10 @@ $downvote-color = red
   float: left
   margin-bottom: rem(5px)
 
+  .history
+    float: right
+    margin-left: rem(5px)
+
 .dczcomments__operations
   font-size: rem($font-size)
   float: right
@@ -79,7 +83,7 @@ $downvote-color = red
     transition: border-color .2s linear, opacity .2s linear
     opacity: 0.5
 
-    &>form
+    &>button
       width: rem(40px)
       float: left
       position: relative
@@ -129,6 +133,8 @@ $downvote-color = red
       box-shadow: none !important
       cursor: default
 
+.dczcomments__replies .collapsible-content__inner
+  max-height: rem(200px)
 
 +mobile()
   .dczcomments__item

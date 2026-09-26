@@ -1,13 +1,17 @@
-import Prism from 'prismjs';
-import components from 'prismjs/components';
-import getLoader from 'prismjs/dependencies';
+import Prism from 'prismjs'; // eslint-disable-line
+
 import 'prismjs/plugins/toolbar/prism-toolbar';
 import 'prismjs/plugins/toolbar/prism-toolbar.css';
 import 'prismjs/plugins/line-numbers/prism-line-numbers';
 import 'prismjs/plugins/line-numbers/prism-line-numbers.css';
+import 'prismjs/plugins/line-highlight/prism-line-highlight';
+
 import Clipboard from 'clipboard';
+import $ from 'jquery';
+import components from 'prismjs/components';
+import getLoader from 'prismjs/dependencies';
 import Notification from 'vj/components/notification/index';
-import i18n from 'vj/utils/i18n';
+import { i18n } from 'vj/utils';
 import languageMeta from './meta';
 
 const files = require.context('prismjs/components/', true, /prism-[a-z0-9-]+\.js/);
@@ -27,7 +31,6 @@ loadLanguages();
 languageMeta.forEach((meta) => {
   for (let i = 0; i < meta.ext.length; ++i) {
     if (Prism.languages[meta.ext[i]] !== undefined) {
-      // eslint-disable-next-line no-param-reassign
       meta.target = meta.ext[i];
       break;
     }
@@ -40,7 +43,7 @@ languageMeta.forEach((meta) => {
 // Copy to Clipboard
 Prism.plugins.toolbar.registerButton('copy-to-clipboard', (env) => {
   const linkCopy = document.createElement('a');
-  linkCopy.href = 'javascript:;'; // eslint-disable-line no-script-url
+  linkCopy.href = 'javascript:;';
   linkCopy.textContent = 'Copy';
   const clip = new Clipboard(linkCopy, { text: () => env.code });
   clip.on('success', () => {
@@ -63,14 +66,14 @@ const invisibles = {
 function addInvisibles(grammar) {
   if (!grammar || grammar.tab) return;
   for (const name in invisibles) {
-    if (Object.prototype.hasOwnProperty.call(invisibles, name)) {
+    if (Object.hasOwn(invisibles, name)) {
       grammar[name] = invisibles[name];
     }
   }
   for (const name in grammar) {
-    if (Object.prototype.hasOwnProperty.call(grammar, name) && !invisibles[name]) {
+    if (Object.hasOwn(grammar, name) && !invisibles[name]) {
       if (name === 'rest') addInvisibles(grammar.rest);
-      else handlerInvisiblesToken(grammar, name); // eslint-disable-line @typescript-eslint/no-use-before-define
+      else handlerInvisiblesToken(grammar, name); // eslint-disable-line ts/no-use-before-define
     }
   }
 }
@@ -85,8 +88,8 @@ function handlerInvisiblesToken(tokens, name) {
   } else if (type === 'Array') {
     for (let i = 0, l = value.length; i < l; i++) handlerInvisiblesToken(value, i);
   } else {
-    const inside = value.inside || (value.inside = {});
-    addInvisibles(inside);
+    value.inside ||= {};
+    addInvisibles(value.inside);
   }
 }
 

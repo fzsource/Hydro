@@ -1,9 +1,9 @@
 import moment from 'moment-timezone';
-import * as bus from '../service/bus';
+import { Context } from '../context';
 import db from '../service/db';
-import { ArgMethod } from '../utils';
+import { ArgMethod, Time } from '../utils';
 
-const coll = db.collection('blacklist');
+let coll = db.collection('blacklist');
 
 class BlackListModel {
     @ArgMethod
@@ -12,13 +12,12 @@ class BlackListModel {
         if (expire === 0) expireAt = moment().add(1000, 'months').toDate();
         else if (typeof expire === 'number') expireAt = moment().add(expire, 'months').toDate();
         else if (expire instanceof Date) expireAt = expire;
-        else expireAt = new Date(new Date().getTime() + 365 * 24 * 60 * 60 * 1000);
-        const res = await coll.findOneAndUpdate(
+        else expireAt = new Date(Date.now() + 365 * Time.day);
+        return await coll.findOneAndUpdate(
             { _id: id },
             { $set: { expireAt } },
             { upsert: true, returnDocument: 'after' },
         );
-        return res.value;
     }
 
     @ArgMethod
@@ -32,9 +31,12 @@ class BlackListModel {
     }
 }
 
-bus.once('app/started', () => db.ensureIndexes(
-    coll,
-    { key: { expireAt: -1 }, name: 'expire', expireAfterSeconds: 0 },
-));
+export async function apply(ctx: Context) {
+    coll = ctx.db.collection('blacklist');
+    await ctx.db.ensureIndexes(
+        coll,
+        { key: { expireAt: -1 }, name: 'expire', expireAfterSeconds: 0 },
+    );
+}
 export default BlackListModel;
 global.Hydro.model.blacklist = BlackListModel;

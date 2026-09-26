@@ -93,7 +93,7 @@ $hover-background-color = #424242
     box-shadow: 0 0.125rem 0.625rem rgba(255 255 255 20%)
 
   .section__table-header
-    background-color: transparent
+    background-color: rgba(0, 0, 0, 0.95)
     box-shadow: 0 0.1875rem 0.125rem rgba(255 255 255 3%)
 
   .data-table tr
@@ -118,6 +118,9 @@ $hover-background-color = #424242
 
   .sidebar-user-profile .user-profile-name
     color: #bbb
+
+  .section__tab-header-item
+    color: #d8e0e6 !important
 
   .section__tab-header-item:hover
     background-color: #171717
@@ -153,7 +156,7 @@ $hover-background-color = #424242
     border-color: #2960a0
     outline-color: #102f4e
 
-  input.textbox, textarea.textbox
+  input.textbox, textarea.textbox, span.textbox
     border: 1px solid #323232
     background-color: #1f1f1f
 
@@ -196,7 +199,7 @@ $hover-background-color = #424242
     background-color: #171717
     color: #999
 
-  pre:not(.vditor-sv), code
+  pre, code
     background-color: #171717
 
   .scratchpad__toolbar
@@ -212,16 +215,12 @@ $hover-background-color = #424242
   .menu__link.highlight
     background: rgb(40, 11, 20)
 
-  .bp4-tag.bp4-minimal:not([class*="bp4-intent-"])
-    background-color: rgba(87, 100, 117, .2)
-    color: #d9dfe7
-
   .typo table thead th
     background: #1e1e1e
     background-color: rgb(30, 30, 30)
 
   .typo table th, .typo table td, .typo table caption
-    border-color: #323232
+    border-color: #666
     color: #999
 
   body>.marker
@@ -278,6 +277,9 @@ $hover-background-color = #424242
 
   .autocomplete-tag
     background-color: #ff0000
+
+  .problem__tag-item
+    color: #d8dee3
 
   .problem__tag-link
     background-color: #1f1f1f
@@ -375,3 +377,31 @@ $hover-background-color = #424242
       border-bottom-color: #1d1d1d
     }
   }
+
+  .omnibar-toggle
+    background-color: $main-background-color
+    color: $content-color
+
+  .omnibar-main 
+    color: $content-color
+    
+    input
+      background-color: $main-background-color !important
+      border-color: #3d3d3d !important
+    
+    .omnibar-content-section
+      background-color: $main-background-color !important
+      border-color: #3d3d3d !important
+
+  &.hasjs .collapsed #status:not([data-status="7"]) .compiler-text-mask
+    background-image: linear-gradient(to bottom, transparent, #000000 25px)
+
+  &.page--record_detail .subtask
+    background-color: #000 !important
+
+  &.page--contest_scoreboard .star-highlight 
+    background: #6f757b
+
+  .search-sort
+    color: #eee
+    background-color: #1f1f1f

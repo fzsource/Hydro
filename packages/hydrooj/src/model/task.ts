@@ -1,171 +1,162 @@
 import { hostname } from 'os';
-import moment from 'moment-timezone';
-import { FilterQuery, ObjectID } from 'mongodb';
+import cac from 'cac';
+import { BSON, Filter, ObjectId } from 'mongodb';
+import { nanoid } from 'nanoid';
 import { sleep } from '@hydrooj/utils/lib/utils';
-import { BaseService, EventDoc, Task } from '../interface';
+import { Context } from '../context';
+import { EventDoc, Task } from '../interface';
 import { Logger } from '../logger';
-import * as bus from '../service/bus';
+import bus from '../service/bus';
 import db from '../service/db';
 
 const logger = new Logger('model/task');
 const coll = db.collection('task');
 const collEvent = db.collection('event');
+const argv = cac().parse();
 
-async function getFirst(query: FilterQuery<Task>) {
+async function getFirst(query: Filter<Task>) {
     if (process.env.CI) return null;
-    const q = { ...query };
-    q.executeAfter = q.executeAfter || { $lt: new Date() };
-    const res = await coll.findOneAndDelete(q, { sort: { priority: -1 } });
-    if (res.value) {
-        logger.debug('%o', res.value);
-        if (res.value.interval) {
-            const executeAfter = moment(res.value.executeAfter).add(...res.value.interval).toDate();
-            await coll.insertOne({ ...res.value, executeAfter });
+    try {
+        const q = { ...query };
+        const res = await coll.findOneAndDelete(q, { sort: { priority: -1 } });
+        if (res) {
+            logger.debug('%o', res);
+            return res;
         }
-        return res.value;
+        return null;
+    } catch (e) {
+        // Usually caused by the database being down
+        // Should recover once it is back
+        logger.error(e);
+        return null;
     }
-    return null;
 }
 
-class Consumer {
+export class Consumer {
     consuming: boolean;
+    processing: Set<Task> = new Set();
     running?: any;
+    notify: (res?: any) => void;
 
-    constructor(public filter: any, public func: Function, public destoryOnError = true) {
+    constructor(public filter: any, public func: (t: Task) => Promise<void>, public destroyOnError = true, private concurrency = 1) {
         this.consuming = true;
         this.consume();
-        bus.on('app/exit', this.destory);
+        bus.on('app/exit', this.destroy);
     }
 
     async consume() {
         while (this.consuming) {
             try {
-                // eslint-disable-next-line no-await-in-loop
-                const res = await getFirst(this.filter);
-                if (res) {
-                    this.running = res;
+                if (this.processing.size >= this.concurrency) {
                     // eslint-disable-next-line no-await-in-loop
-                    await this.func(res);
-                    this.running = null;
+                    await new Promise((resolve) => {
+                        this.notify = resolve;
+                    });
+                    continue;
+                }
+                const res = await getFirst(this.filter); // eslint-disable-line no-await-in-loop
+                if (!res) {
                     // eslint-disable-next-line no-await-in-loop
-                } else await sleep(1000);
+                    await Promise.race([
+                        new Promise((resolve) => { this.notify = resolve; }),
+                        sleep(1000 / (this.concurrency - this.processing.size)),
+                    ]);
+                    continue;
+                }
+                this.processing.add(res);
+                this.func(res)
+                    .catch((err) => {
+                        logger.error(err);
+                        if (this.destroyOnError) this.destroy();
+                    })
+                    .finally(() => {
+                        this.processing.delete(res);
+                        this.notify?.();
+                    });
             } catch (err) {
                 logger.error(err);
-                if (this.destoryOnError) this.destory();
+                if (this.destroyOnError) this.destroy();
             }
         }
     }
 
-    async destory() {
+    async destroy() {
         this.consuming = false;
+        this.notify?.();
+    }
+
+    setConcurrency(concurrency: number) {
+        this.concurrency = concurrency;
+        this.notify?.();
+    }
+
+    setQuery(query: string) {
+        this.filter = query;
+        this.notify?.();
     }
 }
-
-class WorkerService implements BaseService {
-    private handlers: Record<string, Function> = {};
-    public started = true;
-    public start = () => { };
-    public consumer = new Consumer(
-        { type: 'schedule', subType: { $in: Object.keys(this.handlers) } },
-        async (doc) => {
-            try {
-                logger.debug('Worker task: %o', doc);
-                const start = Date.now();
-                await Promise.race([
-                    this.handlers[doc.subType](doc),
-                    sleep(300000),
-                ]);
-                const spent = Date.now() - start;
-                if (spent > 500) logger.warn('Slow worker task (%d ms): %s', spent, doc);
-            } catch (e) {
-                logger.error('Worker task fail: ', e);
-                logger.error('%o', doc);
-            }
-        },
-        false,
-    );
-
-    public addHandler(type: string, handler: Function) {
-        this.handlers[type] = handler;
-        this.consumer.filter = { type: 'schedule', subType: { $in: Object.keys(this.handlers) } };
-    }
-}
-
-const Worker = new WorkerService();
 
 class TaskModel {
+    static coll = coll;
+
     static async add(task: Partial<Task> & { type: string }) {
         const t: Task = {
             ...task,
             priority: task.priority ?? 0,
-            executeAfter: task.executeAfter || new Date(),
-            _id: new ObjectID(),
+            _id: new ObjectId(),
         };
         const res = await coll.insertOne(t);
         return res.insertedId;
     }
 
-    static get(_id: ObjectID) {
+    static async addMany(tasks: Task[]) {
+        const res = await coll.insertMany(tasks);
+        return res.insertedIds;
+    }
+
+    static get(_id: ObjectId) {
         return coll.findOne({ _id });
     }
 
-    static count(query: FilterQuery<Task>) {
-        return coll.find(query).count();
+    static count(query: Filter<Task>) {
+        return coll.countDocuments(query);
     }
 
-    static del(_id: ObjectID) {
+    static del(_id: ObjectId) {
         return coll.deleteOne({ _id });
     }
 
-    static deleteMany(query: FilterQuery<Task>) {
+    static deleteMany(query: Filter<Task>) {
         return coll.deleteMany(query);
     }
 
     static getFirst = getFirst;
 
-    static async getDelay(query?: FilterQuery<Task>): Promise<[number, Date]> {
-        const now = new Date();
-        const [res] = await coll.find(query).sort({ executeAfter: 1 }).limit(1).toArray();
-        if (res) return [Math.max(0, now.getTime() - res.executeAfter.getTime()), res.executeAfter];
-        return [0, now];
+    static consume(query: any, cb: (t: Task) => Promise<void>, destroyOnError = true, concurrency = 1) {
+        return new Consumer(query, cb, destroyOnError, concurrency);
     }
-
-    static async consume(query: any, cb: Function, destoryOnError = true) {
-        return new Consumer(query, cb, destoryOnError);
-    }
-
-    static Consumer = Consumer;
-    static WorkerService = WorkerService;
-    static Worker = Worker;
 }
 
-const id = hostname();
-Worker.addHandler('task.daily', async () => {
-    await global.Hydro.model.record.coll.deleteMany({ contest: new ObjectID('000000000000000000000000') });
-    await global.Hydro.script.rp?.run({}, new Logger('task/rp').debug);
-    await global.Hydro.script.problemStat?.run({}, new Logger('task/problem').debug);
-    if (global.Hydro.model.system.get('server.checkUpdate')) {
-        await global.Hydro.script.checkUpdate?.run({}, new Logger('task/checkUpdate').debug);
-    }
-    await bus.serial('task/daily');
-});
-bus.on('domain/delete', (domainId) => coll.deleteMany({ domainId }));
-bus.once('app/started', async () => {
-    if (process.env.NODE_APP_INSTANCE !== '0') return;
-    if (!await TaskModel.count({ type: 'schedule', subType: 'task.daily' })) {
-        await TaskModel.add({
-            type: 'schedule',
-            subType: 'task.daily',
-            executeAfter: moment().add(1, 'day').hour(3).minute(0).second(0).millisecond(0).toDate(),
-            interval: [1, 'day'],
+const id = process.env.exec_mode === 'cluster_mode' ? hostname() : nanoid();
+
+export async function apply(ctx: Context) {
+    ctx.on('domain/delete', (domainId) => coll.deleteMany({ domainId }));
+    ctx.on('bus/broadcast', (event, payload, trace) => {
+        collEvent.insertOne({
+            ack: [id],
+            event,
+            payload: BSON.EJSON.stringify(payload),
+            expire: new Date(Date.now() + 10000),
+            trace,
         });
-    }
-    await collEvent.createIndex({ expire: 1 }, { expireAfterSeconds: 0 });
+    });
+
+    if (process.env.NODE_APP_INSTANCE !== '0') return;
     const stream = collEvent.watch();
     const handleEvent = async (doc: EventDoc) => {
-        const payload = JSON.parse(doc.payload);
-        if (process.send) process.send({ type: 'hydro:broadcast', data: { event: doc.event, payload } });
-        await bus.parallel(doc.event, ...payload);
+        process.send?.({ type: 'hydro:broadcast', data: doc });
+        const payload = BSON.EJSON.parse(doc.payload);
+        await (bus.parallel as any)(doc.event, ...payload);
     };
     stream.on('change', async (change) => {
         if (change.operationType !== 'insert') return;
@@ -175,26 +166,28 @@ bus.once('app/started', async () => {
     stream.on('error', async () => {
         // The $changeStream stage is only supported on replica sets
         logger.info('No replica set found.');
-        // eslint-disable-next-line no-constant-condition
         while (true) {
+            let res;
+            try {
+                // eslint-disable-next-line no-await-in-loop
+                res = await collEvent.findOneAndUpdate(
+                    { expire: { $gt: new Date() }, ack: { $nin: [id] } },
+                    { $push: { ack: id } },
+                );
+            } catch (e) {
+                logger.error(e);
+                // eslint-disable-next-line no-await-in-loop
+                await sleep(50); // This allows exiting when shutting down
+                continue;
+            }
+            if (argv.options.showEvent) logger.info('Event: %o', res);
             // eslint-disable-next-line no-await-in-loop
-            const res = await collEvent.findOneAndUpdate(
-                { ack: { $nin: [id] } },
-                { $push: { ack: id } },
-            );
-            // eslint-disable-next-line no-await-in-loop
-            await (res.value ? handleEvent(res.value) : sleep(500));
+            await (res ? handleEvent(res) : sleep(500));
         }
     });
-});
-bus.on('bus/broadcast', (event, payload) => {
-    collEvent.insertOne({
-        ack: [id],
-        event,
-        payload: JSON.stringify(payload),
-        expire: new Date(Date.now() + 10000),
-    });
-});
+    await db.ensureIndexes(collEvent, { name: 'expire', key: { expire: 1 }, expireAfterSeconds: 0 });
+    await db.ensureIndexes(coll, { name: 'task', key: { type: 1, subType: 1, priority: -1 } });
+}
 
 export default TaskModel;
 global.Hydro.model.task = TaskModel;

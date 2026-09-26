@@ -1,34 +1,33 @@
-import { CopyInFile } from './sandbox/interface';
+import {
+    DetailType, JudgeResultBody, type LangConfig, NormalizedSubtask, ProblemConfigFile,
+} from '@hydrooj/common';
+import { CopyInFile } from './sandbox';
+import type { JudgeTask } from './task';
 
 export interface Execute {
-    execute: string,
-    clean: Function,
-    copyIn: Record<string, CopyInFile>,
-    time?: number,
-}
-
-export interface CompileErrorInfo {
-    stdout?: string,
-    stderr?: string,
-    status?: number
-}
-
-export interface CheckConfig {
     execute: string;
-    checker_type: string;
-    input: CopyInFile;
-    output: CopyInFile;
-    user_stdout: CopyInFile;
-    user_stderr: CopyInFile;
+    clean: () => Promise<any>;
     copyIn: Record<string, CopyInFile>;
-    score: number;
-    detail: boolean;
-    env?: Record<string, string>;
+    [Symbol.asyncDispose]: () => Promise<any>;
+    _cacheable?: string;
 }
 
-export interface CheckResult {
-    status: number,
-    score: number,
-    message: string,
-    code?: number,
+export type NextFunction = (body: Partial<JudgeResultBody>) => Promise<void> | void;
+
+export interface ParsedConfig extends Omit<ProblemConfigFile, 'time' | 'memory' | 'subtasks' | 'detail'> {
+    count: number;
+    time: number;
+    memory: number;
+    subtasks: NormalizedSubtask[];
+    detail: DetailType;
+}
+
+export { JudgeRequest } from '@hydrooj/common';
+
+export interface Session {
+    getLang: (name: string, doThrow?: boolean) => LangConfig;
+    getReporter: (task: JudgeTask) => { next: NextFunction, end: NextFunction };
+    fetchFile: <T extends null | string>(namespace: T, files: Record<string, string>, ctx: JudgeTask) => Promise<T extends null ? string : null>;
+    postFile: (target: string, filename: string, file: string) => Promise<void>;
+    config: { detail: DetailType, host?: string, trusted?: boolean };
 }

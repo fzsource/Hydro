@@ -1,8 +1,5 @@
-const versionNum = +process.version.replace(/v/gim, '').split('.')[0];
-if (versionNum < 10) throw new Error('NodeJS >=10.4 required');
-else if (versionNum < 14 && process.env.NODE_APP_INSTANCE === '0') {
-    console.warn('NodeJS version <14, startup performance will be impacted.');
-}
+const versionNum = +process.version.replace(/v/gi, '').split('.')[0];
+if (versionNum < 22) throw new Error('NodeJS >=22 required');
 
 console.log('Process', process.pid, 'running as', process.env.NODE_APP_INSTANCE === '0' ? 'master' : 'worker');
 if (!global.Hydro) {
@@ -11,28 +8,24 @@ if (!global.Hydro) {
             node: process.version.split('v')[1],
             hydrooj: require('hydrooj/package.json').version,
         },
-        handler: {},
-        // @ts-ignore
-        service: {},
         // @ts-ignore
         model: {},
         script: {},
-        // @ts-ignore
-        lib: {},
-        // @ts-ignore
-        ui: {
-            manifest: {},
-            nodes: {
-                nav: [],
-                problem_add: [],
-                user_dropdown: [],
+        module: new Proxy({} as any, {
+            get(self, key) {
+                self[key] ||= {};
+                return self[key];
             },
-            template: {},
-        },
+        }),
+        // @ts-ignore
+        ui: {},
         // @ts-ignore
         error: {},
         locales: {},
     };
-    global.addons = [];
-    global.publicDirs = [];
+    global.addons = {};
 }
+global.app = new (require('./context').Context)();
+process.on('exit', () => {
+
+});

@@ -1,5 +1,7 @@
-import { readFile } from 'fs-extra';
-import { STATUS } from '@hydrooj/utils/lib/status';
+import assert from 'assert';
+import { STATUS } from '@hydrooj/common';
+import { fs, yaml } from '@hydrooj/utils';
+import { FormatError } from '../error';
 import { Context } from './interface';
 
 export async function judge({
@@ -7,33 +9,73 @@ export async function judge({
 }: Context) {
     next({ status: STATUS.STATUS_JUDGING, progress: 0 });
     const answer = ('src' in code)
-        ? await readFile(code.src, 'utf-8')
+        ? await fs.readFile(code.src, 'utf-8')
         : ('content' in code)
             ? code.content.toString().replace(/\r/g, '')
             : '';
-    const outputs = answer.split('\n');
+    let answers: { [x: string]: string | string[] } = {};
+    try {
+        answers = yaml.load(answer) as any;
+        assert(typeof answers === 'object');
+    } catch (e) {
+        end({
+            status: STATUS.STATUS_WRONG_ANSWER,
+            score: 0,
+            message: 'Unable to parse answer.',
+            time: 0,
+            memory: 0,
+        });
+        return null;
+    }
     let totalScore = 0;
     let totalStatus = 0;
-    for (const i in config.outputs) {
-        const c = config.outputs[i];
-        outputs[i] = outputs[i] || '';
-        let status = STATUS.STATUS_WRONG_ANSWER;
-        let score = 0;
-        if (outputs[i].trim() === (c.output || c[0]).trim()) {
-            score = c.score || c[1];
-            status = STATUS.STATUS_ACCEPTED;
+    const subtasks = {};
+    if (!Object.keys(config.answers).length) throw new FormatError('Invalid standard answer.');
+    for (const key in config.answers) {
+        const ansInfo = config.answers[key] as [string | string[], number] | Record<string, number>;
+        // eslint-disable-next-line ts/no-loop-func
+        const report = (status: STATUS, score: number, message: string) => {
+            const [subtaskId, caseId] = key.split('-').map(Number);
+            totalScore += score;
+            totalStatus = Math.max(totalStatus, status);
+            subtasks[subtaskId] ||= { score, status };
+            if (subtasks[subtaskId].status && caseId) {
+                subtasks[subtaskId].score += score;
+                subtasks[subtaskId].status = Math.max(subtasks[subtaskId].status, status);
+            }
+            next({
+                case: {
+                    subtaskId,
+                    id: caseId,
+                    time: 0,
+                    memory: 0,
+                    status,
+                    score,
+                    message,
+                },
+            });
+        };
+        if (!answers[key]) {
+            report(STATUS.STATUS_WRONG_ANSWER, 0, 'No answer');
+            continue;
         }
-        totalScore += score;
-        totalStatus = Math.max(status, totalStatus);
-        next({
-            status: totalStatus,
-            progress: (100 * (+i + 1)) / config.outputs.length,
-            case: {
-                status, score, time: 0, memory: 0, message: '',
-            },
-        }, +i + 1);
+        const usrAns = answers[key].toString().trim();
+        if (ansInfo instanceof Array) {
+            const fullScore = (+ansInfo[1]) || 0;
+            const stdAns = ansInfo[0];
+            if (stdAns instanceof Array) {
+                const stdSet = new Set(stdAns);
+                const ans = new Set(answers[key] instanceof Array ? answers[key] : [answers[key]]);
+                if (stdAns.length === ans.size && stdSet.isSupersetOf(ans)) report(STATUS.STATUS_ACCEPTED, fullScore, 'Correct');
+                else if (ans.size && stdSet.isSupersetOf(ans)) report(STATUS.STATUS_WRONG_ANSWER, Math.floor(fullScore / 2), 'Partially Correct');
+                else report(STATUS.STATUS_WRONG_ANSWER, 0, 'Incorrect');
+            } else if (stdAns.toString() === usrAns) report(STATUS.STATUS_ACCEPTED, fullScore, 'Correct');
+            else report(STATUS.STATUS_WRONG_ANSWER, 0, 'Incorrect');
+        } else if (!ansInfo[usrAns]) report(STATUS.STATUS_WRONG_ANSWER, 0, 'Incorrect');
+        else report(STATUS.STATUS_ACCEPTED, +ansInfo[usrAns] || 0, 'Correct');
     }
-    return end({
-        status: totalStatus, score: totalScore, time: 0, memory: 0,
+    end({
+        status: totalStatus, score: totalScore, time: 0, memory: 0, subtasks,
     });
+    return null;
 }

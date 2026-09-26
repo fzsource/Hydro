@@ -1,45 +1,27 @@
-/* eslint-disable @typescript-eslint/no-shadow */
 import { Logger } from './logger';
-import * as bus from './service/bus';
+import bus from './service/bus';
 
-export namespace Progress {
-    export class Progress {
-        constructor(public args) {
-            console.log('progress start: ', args);
-        }
-
-        startItem(args) {
-            console.log('progress: ', this.args, args);
-        }
-
-        itemDone(args) {
-            console.log('done: ', this.args, args);
-        }
-
-        stop() {
-            console.log('stop', this.args);
-        }
-    }
-
-    export function create(args) {
-        return new Progress(args);
-    }
-}
-
+let terminating = false;
 async function terminate() {
+    if (terminating) process.exit(1);
     let hasError = false;
+    terminating = true;
+    setTimeout(() => {
+        new Logger('exit').info('Cleaning up temporary files... (Press Ctrl-C again to force exit)');
+    }, 1000);
     try {
         await bus.parallel('app/exit');
+        await app.fiber.dispose();
     } catch (e) {
         hasError = true;
     }
     process.exit(hasError ? 1 : 0);
 }
 process.on('SIGINT', terminate);
+process.on('SIGTERM', terminate);
 
 const shell = new Logger('shell');
 async function executeCommand(input: string) {
-    input = input.trim();
     // Clear the stack
     setImmediate(async () => {
         if (input === 'exit' || input === 'quit' || input === 'shutdown') {
@@ -56,9 +38,20 @@ async function executeCommand(input: string) {
     });
 }
 
+let readlineCallback;
+
 process.stdin.setEncoding('utf-8');
-if (process.stdin.setRawMode) process.stdin.setRawMode(false);
+process.stdin.setRawMode?.(false);
 process.stdin.on('data', (buf) => {
-    const input = buf.toString();
-    executeCommand(input);
+    const input = buf.toString().trim();
+    if (readlineCallback) {
+        readlineCallback(input);
+        readlineCallback = null;
+    } else executeCommand(input);
 });
+
+export const useReadline = (callback: (str: string) => any) => {
+    if (readlineCallback) throw new Error('Already waiting for input.');
+    readlineCallback = callback;
+};
+export const readline = () => new Promise<string>((resolve) => { useReadline(resolve); });

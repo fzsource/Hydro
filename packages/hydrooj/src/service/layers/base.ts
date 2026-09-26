@@ -1,88 +1,77 @@
-import { PassThrough } from 'stream';
-import { cloneDeep } from 'lodash';
-import * as system from 'hydrooj/src/model/system';
-import token from 'hydrooj/src/model/token';
-import type { HydroRequest, HydroResponse } from 'hydrooj/src/service/server';
+import type { Next } from 'koa';
+import { cloneDeep, omit } from 'lodash';
+import type { KoaContext } from '@hydrooj/framework';
+import { randomPick, Time } from '@hydrooj/utils';
+import { PERM } from '../../model/builtin';
+import domain from '../../model/domain';
+import system from '../../model/system';
+import token from '../../model/token';
 
 export interface UiContextBase {
     cdn_prefix: string;
+    cdn_dynamic: boolean;
     url_prefix: string;
+    ws_prefix: string;
 }
 export const UiContextBase: UiContextBase = {
     cdn_prefix: '/',
+    cdn_dynamic: false,
     url_prefix: '/',
+    ws_prefix: '/',
 };
 
-export default async (ctx, next) => {
+export default async (ctx: KoaContext, next: Next) => {
     // Base Layer
     const { domainId, domainInfo } = ctx;
-    const isWebsocket = ctx.request.headers.upgrade === 'websocket';
-    const [xff, xhost] = system.getMany(['server.xff', 'server.xhost']);
-    const ip = ctx.request.headers[xff?.toLowerCase() || ''] as string || ctx.request.ip;
-    const host = ctx.request.headers[xhost?.toLowerCase() || ''] as string || ctx.request.host;
-    const request: HydroRequest = {
-        method: ctx.request.method.toLowerCase(),
-        host,
-        hostname: ctx.request.hostname,
-        ip,
-        headers: ctx.request.headers,
-        cookies: ctx.cookies,
-        body: ctx.request.body,
-        files: ctx.request.files as any,
-        query: ctx.query,
-        path: ctx.path,
-        params: ctx.params,
-        referer: ctx.request.headers.referer || '',
-        json: (ctx.request.headers.accept || '').includes('application/json'),
-        websocket: isWebsocket,
-    };
-    const response: HydroResponse = {
-        body: {},
-        type: '',
-        status: null,
-        template: null,
-        redirect: null,
-        attachment: (name, streamOrBuffer) => {
-            ctx.attachment(name);
-            if (streamOrBuffer instanceof Buffer) {
-                response.body = null;
-                ctx.body = streamOrBuffer;
-            } else {
-                response.body = null;
-                ctx.body = streamOrBuffer.pipe(new PassThrough());
-            }
-        },
-        addHeader: (name: string, value: string) => ctx.set(name, value),
-        disposition: null,
-    };
     const args = {
         domainId, ...ctx.params, ...ctx.query, ...ctx.request.body, __start: Date.now(),
     };
     const UiContext: any = cloneDeep(UiContextBase);
-    if (!process.env.DEV) UiContext.cdn_prefix = system.get('server.cdn');
+    if (!process.env.DEV) {
+        UiContext.cdn_prefix = system.get('server.cdn');
+        if (UiContext.cdn_prefix.includes(',')) UiContext.cdn_prefix = randomPick(UiContext.cdn_prefix.split(','));
+        UiContext.ws_prefix = system.get('server.ws');
+        if (UiContext.ws_prefix.includes(',')) UiContext.ws_prefix = randomPick(UiContext.ws_prefix.split(','));
+        UiContext.cdn_dynamic = system.get('server.cdn_dynamic');
+    }
     UiContext.domainId = domainId;
-    UiContext.domain = domainInfo;
-    ctx.HydroContext = {
-        request, response, UiContext, domain: domainInfo, user: null, args,
-    };
+    UiContext.domainVersion = domain.getVersion(domainInfo);
+    ctx.HydroContext.UiContext = UiContext;
+    ctx.HydroContext.domain = domainInfo;
+    ctx.HydroContext.args = args;
+    const header = ctx.request.headers.authorization;
+    const sid = header
+        ? header.split(' ')[1] // Accept bearer token
+        : ctx.cookies.get('sid') || ctx.query.sid; // FIXME maybe a better way for shared conn?
+    const session = sid ? await token.get(sid instanceof Array ? sid[0] : sid, token.TYPE_SESSION) : null;
+    ctx.session = Object.create(session || { uid: 0, scope: PERM.PERM_ALL.toString() });
     await next();
+    const request = ctx.HydroContext.request;
     const ua = request.headers['user-agent'] || '';
     if (!ctx.session.uid && system.get('server.ignoreUA').replace(/\r/g, '').split('\n').filter((i) => i && ua.includes(i)).length) return;
     const expireSeconds = ctx.session.save
         ? system.get('session.saved_expire_seconds')
         : system.get('session.unsaved_expire_seconds');
-    Object.assign(ctx.session, { updateIp: ip, updateUa: ua });
-    if (ctx.session._id) {
-        await token.update(ctx.session._id, token.TYPE_SESSION, expireSeconds, ctx.session);
+    const isRecent = ctx.session.updateAt ? Date.now() - new Date(ctx.session.updateAt).getTime() < 5 * Time.minute : true;
+    if (!Object.getOwnPropertyNames(ctx.session).length && isRecent) return;
+    Object.assign(ctx.session, { updateIp: request.ip, updateUa: ua });
+    if (ctx.session._id && !ctx.session.recreate) {
+        await token.update(ctx.session._id, token.TYPE_SESSION, expireSeconds, omit(ctx.session, ['_id', 'recreate']));
     } else {
-        Object.assign(ctx.session, { createIp: ip, createUa: ua, createHost: host });
-        [ctx.session._id] = await token.add(token.TYPE_SESSION, expireSeconds, ctx.session);
+        if (ctx.session._id) await token.del(ctx.session._id, token.TYPE_SESSION);
+        Object.assign(ctx.session, { createIp: request.ip, createUa: ua, createHost: request.host });
+        [ctx.session._id] = await token.add(token.TYPE_SESSION, expireSeconds, omit(ctx.session, ['_id', 'recreate']));
     }
     if (!request.websocket) {
-        ctx.cookies.set('sid', ctx.session._id, {
+        const options: any = {
             expires: new Date(Date.now() + expireSeconds * 1000),
-            secure: !!system.get('session.secure'),
             httpOnly: false,
-        });
+        };
+        if (system.get('session.domain') && ctx.request.secure && ctx.request.host.endsWith(system.get('session.domain'))) {
+            options.domain = system.get('session.domain');
+            options.sameSite = 'none';
+            options.secure = true;
+        }
+        ctx.cookies.set('sid', ctx.session._id, options);
     }
 };

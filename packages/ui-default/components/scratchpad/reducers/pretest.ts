@@ -1,10 +1,10 @@
-import { STATUS_TEXTS } from '@hydrooj/utils/lib/status';
+import { STATUS_TEXTS } from '@hydrooj/common';
 
 export default function reducer(state = {
   input: '',
   output: '',
   rid: null,
-}, action) {
+}, action: any = {}) {
   if (action.type === 'SCRATCHPAD_PRETEST_DATA_CHANGE') {
     const { type, value } = action.payload;
     return {

@@ -1,11 +1,9 @@
-/* eslint-disable camelcase */
-import en_GB from 'monaco-editor-nls/locale/en-gb.json';
+export { getNLSLanguage, getNLSMessages } from 'monaco-editor/esm/vs/nls.messages';
 
-function _format(message, args) {
+function format(message, args) {
   let result;
-  if (args.length === 0) {
-    result = message;
-  } else {
+  if (!args.length) result = message;
+  else {
     result = String(message).replace(/\{(\d+)\}/g, (match, rest) => {
       const index = rest[0];
       return typeof args[index] !== 'undefined' ? args[index] : match;
@@ -14,36 +12,20 @@ function _format(message, args) {
   return result;
 }
 
-let CURRENT_LOCALE_DATA = {};
-
-function find(path, message) {
-  for (const key of Object.keys(CURRENT_LOCALE_DATA)) {
-    if (!CURRENT_LOCALE_DATA[key] || !en_GB[key]) continue;
-    if (CURRENT_LOCALE_DATA[key][path] && en_GB[key][path] === message) {
-      return CURRENT_LOCALE_DATA[key][path];
-    }
-  }
-  for (const key of Object.keys(CURRENT_LOCALE_DATA)) {
-    if (!CURRENT_LOCALE_DATA[key]) continue;
-    if (CURRENT_LOCALE_DATA[key][path]) {
-      return CURRENT_LOCALE_DATA[key][path];
-    }
-  }
-  return message;
-}
+let CURRENT_LOCALE_DATA = {}; // eslint-disable-line ts/naming-convention
 
 export function localize(path, message, ...args) {
-  return _format(find(path.key || path, message), args);
+  return format(CURRENT_LOCALE_DATA[path.key || path] || CURRENT_LOCALE_DATA[message] || message, args);
+}
+
+export function localize2(data, message, ...args) {
+  const original = localize(data, message, args);
+  return {
+    value: original,
+    original,
+  };
 }
 
 export function setLocaleData(data) {
-  CURRENT_LOCALE_DATA = data;
-}
-
-export function loadMessageBundle() {
-  return localize;
-}
-
-export function config() {
-  return loadMessageBundle;
+  CURRENT_LOCALE_DATA = Object.assign(...Object.values(data));
 }

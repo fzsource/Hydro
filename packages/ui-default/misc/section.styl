@@ -14,8 +14,6 @@
 .section
   background: $section-bg-color
   box-shadow: $section-shadow
-  transition: transform .5s, opacity .5s
-  transition-timing-function: ease-out-cubic
 
   +mobile()
     box-shadow: none
@@ -34,6 +32,12 @@
 .section__header
   padding: rem($section-gap-v) rem($section-gap-h) 0
   position: relative
+
+  &:last-child
+    padding-bottom: rem($section-gap-v)
+
+  +.section__body.no-padding:last-child
+    padding-top: rem($section-gap-v) !important
 
 .section__body
   padding: 0.7em rem($section-gap-h)
@@ -94,7 +98,7 @@ h3.section__title
       color: $section-toolbtn-color-hover
 
 .section__list__item
-  padding: rem($section-gap-v $section-gap-h)
+  padding: rem($section-list-v $section-gap-h)
   border-bottom: 1px solid $table-border-color
 
   &:last-child

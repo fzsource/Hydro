@@ -4,6 +4,8 @@
     "files.eol": "\n",
     "editor.detectIndentation": true,
     "typescript.tsdk": "node_modules/typescript/lib",
+    "typescript.tsserver.maxTsServerMemory": 16384,
+    "typescript.tsserver.nodePath": "node",
     "[json]": {
         "files.insertFinalNewline": true,
         "files.trimFinalNewlines": false
@@ -11,5 +13,20 @@
     "search.exclude": {
         "**/.yarn": true,
         "**/.pnp.*": true
+    },
+    "files.associations": {
+        "*.html": "nunjucks"
+    },
+    "[javascript]": {
+        "editor.defaultFormatter": "dbaeumer.vscode-eslint"
+    },
+    "[typescript]": {
+        "editor.defaultFormatter": "dbaeumer.vscode-eslint"
+    },
+    "[javascriptreact]": {
+        "editor.defaultFormatter": "dbaeumer.vscode-eslint"
+    },
+    "[typescriptreact]": {
+        "editor.defaultFormatter": "dbaeumer.vscode-eslint"
     }
 }

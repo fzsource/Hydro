@@ -1,35 +1,28 @@
 import Notification from 'vj/components/notification';
-import i18n from 'vj/utils/i18n';
+import { i18n } from 'vj/utils';
 
 export default function reducer(state = {
-  main: {
-    size: '50%',
-  },
   pretest: {
-    visible: ['default', 'fileio'].includes(UiContext.pdoc.config?.type)
+    visible: UiContext.pdoc.config?.type === 'default'
       ? localStorage.getItem('scratchpad/pretest') === 'true'
       : false,
-    size: 200,
   },
   records: {
     visible: UiContext.canViewRecord && localStorage.getItem('scratchpad/records') === 'true',
-    size: 100,
     isLoading: false,
   },
+  settings: {
+    visible: false,
+    config: JSON.parse(localStorage.getItem('editor.config') || '{}'),
+  },
   isPosting: false,
-  isWaiting: false,
-}, action) {
+  pretestWaitSec: 0,
+  submitWaitSec: 0,
+  lastTick: 0,
+  activePage: 'problem',
+  pendingCommand: '',
+}, action: any = {}) {
   switch (action.type) {
-    case 'SCRATCHPAD_UI_CHANGE_SIZE': {
-      const { uiElement, size } = action.payload;
-      return {
-        ...state,
-        [uiElement]: {
-          ...state[uiElement],
-          size,
-        },
-      };
-    }
     case 'SCRATCHPAD_UI_SET_VISIBILITY': {
       const { uiElement, visibility } = action.payload;
       localStorage.setItem(`scratchpad/${uiElement}`, visibility.toString());
@@ -52,6 +45,27 @@ export default function reducer(state = {
         },
       };
     }
+    case 'SCRATCHPAD_SETTING_UPDATE': {
+      const { setting, value } = action.payload;
+      const config = {
+        ...state.settings.config,
+        [setting]: value,
+      };
+      localStorage.setItem('editor.config', JSON.stringify(config));
+      return {
+        ...state,
+        settings: {
+          ...state.settings,
+          config,
+        },
+      };
+    }
+    case 'SCRATCHPAD_TRIGGER_EDITOR_COMMAND': {
+      return {
+        ...state,
+        pendingCommand: action.payload.command,
+      };
+    }
     case 'SCRATCHPAD_POST_PRETEST_PENDING':
     case 'SCRATCHPAD_POST_SUBMIT_PENDING': {
       return {
@@ -62,14 +76,20 @@ export default function reducer(state = {
     case 'SCRATCHPAD_POST_PRETEST_FULFILLED':
     case 'SCRATCHPAD_POST_SUBMIT_FULFILLED': {
       Notification.success(i18n('Submitted.'));
-      if (action.type === 'SCRATCHPAD_POST_SUBMIT_FULFILLED' && UiContext.canViewRecord) {
-        state.records.visible = true;
-      }
-      return {
-        ...state,
-        isPosting: false,
-        isWaiting: true,
-      };
+      return (action.type === 'SCRATCHPAD_POST_SUBMIT_FULFILLED' && UiContext.canViewRecord)
+        ? {
+          ...state,
+          records: {
+            ...state.records,
+            visible: true,
+          },
+          isPosting: false,
+          submitWaitSec: 8,
+        } : {
+          ...state,
+          isPosting: false,
+          pretestWaitSec: 5,
+        };
     }
     case 'SCRATCHPAD_POST_PRETEST_REJECTED':
     case 'SCRATCHPAD_POST_SUBMIT_REJECTED': {
@@ -77,7 +97,17 @@ export default function reducer(state = {
       return {
         ...state,
         isPosting: false,
-        isWaiting: true,
+        pretestWaitSec: 3,
+        submitWaitSec: 3,
+      };
+    }
+    case 'SCRATCHPAD_WAITING_TICK': {
+      if (Date.now() - state.lastTick < 950) return state;
+      return {
+        ...state,
+        lastTick: Date.now(),
+        pretestWaitSec: Math.max(state.pretestWaitSec - 1, 0),
+        submitWaitSec: Math.max(state.submitWaitSec - 1, 0),
       };
     }
     case 'SCRATCHPAD_RECORDS_LOAD_SUBMISSIONS_PENDING': {
@@ -108,10 +138,12 @@ export default function reducer(state = {
         },
       };
     }
-    case 'SCRATCHPAD_WAITING_END': {
+    case 'SCRATCHPAD_SWITCH_TO_PAGE': {
+      let newPage = action.payload;
+      if (newPage === state.activePage) newPage = null;
       return {
         ...state,
-        isWaiting: false,
+        activePage: newPage,
       };
     }
     default:

@@ -1,55 +1,35 @@
-import { Readable } from 'stream';
+import { dirname, resolve } from 'path';
+import { PassThrough, Readable } from 'stream';
 import { URL } from 'url';
-import { createReadStream } from 'fs-extra';
-import { BucketItem, Client, ItemBucketMetadata } from 'minio';
+import {
+    DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand,
+    HeadObjectCommand, PutObjectCommand, PutObjectCommandInput, S3Client,
+} from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
+import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import {
+    copyFile, createReadStream, createWriteStream, ensureDir,
+    existsSync, remove, stat, writeFile,
+} from 'fs-extra';
+import proxy from 'koa-proxies';
+import { lookup } from 'mime-types';
+import { nanoid } from 'nanoid';
+import Schema from 'schemastery';
+import { Context } from '../context';
 import { Logger } from '../logger';
-import * as system from '../model/system';
+import { MaybeArray } from '../typeutils';
+import { md5, streamToBuffer } from '../utils';
 
 const logger = new Logger('storage');
 
-interface StorageOptions {
-    endPoint: string;
-    accessKey: string;
-    secretKey: string;
-    bucket: string;
-    region?: string;
-    pathStyle: boolean;
-    endPointForUser?: string;
-    endPointForJudge?: string;
-}
-
-interface MinioEndpointConfig {
-    endPoint: string;
-    port: number;
-    useSSL: boolean;
-}
-
-function parseMainEndpointUrl(endpoint: string): MinioEndpointConfig {
-    if (!endpoint) throw new Error('Empty endpoint');
-    const url = new URL(endpoint);
-    const result: Partial<MinioEndpointConfig> = {};
-    if (url.pathname !== '/') throw new Error('Main MinIO endpoint URL of a sub-directory is not supported.');
-    if (url.username || url.password || url.hash || url.search) {
-        throw new Error('Authorization, search parameters and hash are not supported for main MinIO endpoint URL.');
-    }
-    if (url.protocol === 'http:') result.useSSL = false;
-    else if (url.protocol === 'https:') result.useSSL = true;
-    else {
-        throw new Error(
-            `Invalid protocol "${url.protocol}" for main MinIO endpoint URL. Only HTTP and HTTPS are supported.`,
-        );
-    }
-    result.endPoint = url.hostname;
-    result.port = url.port ? Number(url.port) : result.useSSL ? 443 : 80;
-    return result as MinioEndpointConfig;
-}
 function parseAlternativeEndpointUrl(endpoint: string): (originalUrl: string) => string {
     if (!endpoint) return (originalUrl) => originalUrl;
     const pathonly = endpoint.startsWith('/');
     if (pathonly) endpoint = `https://localhost${endpoint}`;
     const url = new URL(endpoint);
-    if (url.hash || url.search) throw new Error('Search parameters and hash are not supported for alternative MinIO endpoint URL.');
-    if (!url.pathname.endsWith('/')) throw new Error("Alternative MinIO endpoint URL's pathname must ends with '/'.");
+    if (url.hash || url.search) throw new Error('Search parameters and hash are not supported for alternative endpoint URL.');
+    if (!url.pathname.endsWith('/')) throw new Error("Alternative endpoint URL's pathname must ends with '/'.");
     return (originalUrl) => {
         const parsedOriginUrl = new URL(originalUrl);
         const replaced = new URL(parsedOriginUrl.pathname.slice(1) + parsedOriginUrl.search + parsedOriginUrl.hash, url).toString();
@@ -59,7 +39,7 @@ function parseAlternativeEndpointUrl(endpoint: string): (originalUrl: string) =>
     };
 }
 // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/encodeURIComponent
-function encodeRFC5987ValueChars(str: string) {
+export function encodeRFC5987ValueChars(str: string) {
     return (
         encodeURIComponent(str)
             // Note that although RFC3986 reserves "!", RFC5987 does not,
@@ -72,22 +52,62 @@ function encodeRFC5987ValueChars(str: string) {
     );
 }
 
-class StorageService {
-    public client: Client;
+const convertPath = (p: string) => {
+    p = p.trim();
+    if (p.includes('..') || p.includes('//') || p.endsWith('/.') || p === '.' || p.includes('/./')) {
+        throw new Error('Invalid path');
+    }
+    return p;
+};
+
+const defaultPath = process.env.CI ? '/tmp/file'
+    : process.env.DEFAULT_STORE_PATH || '/data/file/hydro';
+const FileSetting = Schema.intersect([
+    Schema.object({
+        type: Schema.union([
+            Schema.const('file').i18n({ en: 'Local Directory', zh: '本地目录' }),
+            Schema.const('s3').description('S3'),
+        ] as const).i18n({ en: 'Storage Provider Type', zh: '存储提供商类型' }),
+        endPointForUser: Schema.string().default('/fs/'),
+        endPointForJudge: Schema.string().default('/fs/'),
+    }).i18n({ en: 'File Storage Setting', zh: '文件存储设置' }),
+    Schema.union([
+        Schema.object({
+            type: Schema.const('file'),
+            path: Schema.string().default(defaultPath).i18n({ en: 'Storage path', zh: '存储路径' }),
+            secret: Schema.string().default(nanoid()).i18n({ en: 'Download file sign secret', zh: '下载文件签名密钥' }),
+        }),
+        Schema.object({
+            type: Schema.const('s3').required(),
+            endPoint: Schema.string(),
+            accessKey: Schema.string(),
+            secretKey: Schema.string().role('secret'),
+            bucket: Schema.string().default('hydro'),
+            region: Schema.string().default('us-east-1'),
+            pathStyle: Schema.boolean().default(true),
+        }),
+    ] as const),
+] as const);
+
+export const Config = FileSetting;
+
+class RemoteStorageService {
+    public client: S3Client;
     public error = '';
-    public opts: StorageOptions;
-    private replaceWithAlternativeUrlFor: Record<'user' | 'judge', (originalUrl: string) => string>;
+    public bucket = 'hydro';
+    private replaceWithAlternativeUrlFor: Partial<Record<'user' | 'judge', (originalUrl: string) => string>>;
+    private alternatives: Record<'user' | 'judge', S3Client> = {
+        user: null,
+        judge: null,
+    };
+
+    constructor(private config: ReturnType<typeof FileSetting>) {
+    }
 
     async start() {
         try {
-            const [
-                endPoint, accessKey, secretKey, bucket, region,
-                pathStyle, endPointForUser, endPointForJudge,
-            ] = system.getMany([
-                'file.endPoint', 'file.accessKey', 'file.secretKey', 'file.bucket', 'file.region',
-                'file.pathStyle', 'file.endPointForUser', 'file.endPointForJudge',
-            ]);
-            this.opts = {
+            logger.info('Starting storage service with endpoint:', this.config.endPoint);
+            const {
                 endPoint,
                 accessKey,
                 secretKey,
@@ -96,29 +116,37 @@ class StorageService {
                 pathStyle,
                 endPointForUser,
                 endPointForJudge,
+            } = this.config;
+            this.bucket = bucket;
+            const base = {
+                region,
+                forcePathStyle: pathStyle,
+                credentials: {
+                    accessKeyId: accessKey,
+                    secretAccessKey: secretKey,
+                },
             };
-            if (process.env.MINIO_ACCESS_KEY) {
-                logger.info('Using MinIO key from environment variables');
-                this.opts.accessKey = process.env.MINIO_ACCESS_KEY;
-                this.opts.secretKey = process.env.MINIO_SECRET_KEY;
-            }
-            this.client = new Client({
-                ...parseMainEndpointUrl(this.opts.endPoint),
-                pathStyle: this.opts.pathStyle,
-                accessKey: this.opts.accessKey,
-                secretKey: this.opts.secretKey,
+            this.client = new S3Client({
+                endpoint: endPoint,
+                ...base,
             });
-            try {
-                const exists = await this.client.bucketExists(this.opts.bucket);
-                if (!exists) await this.client.makeBucket(this.opts.bucket, this.opts.region);
-            } catch (e) {
-                // Some platform doesn't support bucketExists & makeBucket API.
-                // Ignore this error.
+            this.replaceWithAlternativeUrlFor = {};
+            if (/^https?:\/\//.test(endPointForUser)) {
+                this.alternatives.user = new S3Client({
+                    endpoint: endPointForUser,
+                    ...base,
+                });
+            } else {
+                this.replaceWithAlternativeUrlFor.user = parseAlternativeEndpointUrl(endPointForUser);
             }
-            this.replaceWithAlternativeUrlFor = {
-                user: parseAlternativeEndpointUrl(this.opts.endPointForUser),
-                judge: parseAlternativeEndpointUrl(this.opts.endPointForJudge),
-            };
+            if (/^https?:\/\//.test(endPointForJudge)) {
+                this.alternatives.judge = new S3Client({
+                    endpoint: endPointForJudge,
+                    ...base,
+                });
+            } else {
+                this.replaceWithAlternativeUrlFor.judge = parseAlternativeEndpointUrl(endPointForJudge);
+            }
             logger.success('Storage connected.');
             this.error = null;
         } catch (e) {
@@ -129,114 +157,282 @@ class StorageService {
         }
     }
 
-    async put(target: string, file: string | Buffer | Readable, meta: ItemBucketMetadata = {}) {
-        if (target.includes('..') || target.includes('//')) throw new Error('Invalid path');
+    async put(target: string, file: string | Buffer | Readable, meta: Record<string, string> = {}) {
+        target = convertPath(target);
         if (typeof file === 'string') file = createReadStream(file);
-        try {
-            return await this.client.putObject(this.opts.bucket, target, file, meta);
-        } catch (e) {
-            e.stack = new Error().stack;
-            throw e;
+        const params: PutObjectCommandInput = {
+            Bucket: this.bucket,
+            Key: target,
+            Body: file,
+            Metadata: meta,
+            ContentType: meta['Content-Type'] || 'application/octet-stream',
+        };
+        if (file instanceof Buffer && file.byteLength <= 5 * 1024 * 1024) {
+            await this.client.send(new PutObjectCommand(params));
+        } else {
+            const upload = new Upload({
+                client: this.client,
+                params,
+                tags: [],
+                queueSize: 4,
+                partSize: 1024 * 1024 * 5,
+                leavePartsOnError: false,
+            });
+            await upload.done();
         }
     }
 
     async get(target: string, path?: string) {
-        if (target.includes('..') || target.includes('//')) throw new Error('Invalid path');
-        try {
-            if (path) return await this.client.fGetObject(this.opts.bucket, target, path);
-            return await this.client.getObject(this.opts.bucket, target);
-        } catch (e) {
-            e.stack = new Error().stack;
-            throw e;
+        target = convertPath(target);
+        const res = await this.client.send(new GetObjectCommand({
+            Bucket: this.bucket,
+            Key: target,
+        }));
+        if (!res.Body) throw new Error();
+        const stream = res.Body as Readable;
+        if (path) {
+            await new Promise((end, reject) => {
+                const file = createWriteStream(path);
+                stream.on('error', reject);
+                stream.on('end', () => {
+                    file.close();
+                    end(null);
+                });
+                stream.pipe(file);
+            });
+            return null;
         }
+        const p = new PassThrough();
+        stream.pipe(p);
+        return p;
     }
 
     async del(target: string | string[]) {
+        if (typeof target === 'string') target = convertPath(target);
+        else target = target.map(convertPath);
         if (typeof target === 'string') {
-            if (target.includes('..') || target.includes('//')) throw new Error('Invalid path');
-        } else {
-            for (const t of target) {
-                if (t.includes('..') || t.includes('//')) throw new Error('Invalid path');
-            }
+            return await this.client.send(new DeleteObjectCommand({
+                Bucket: this.bucket,
+                Key: target,
+            }));
         }
-        try {
-            if (typeof target === 'string') return await this.client.removeObject(this.opts.bucket, target);
-            return await this.client.removeObjects(this.opts.bucket, target);
-        } catch (e) {
-            e.stack = new Error().stack;
-            throw e;
-        }
-    }
-
-    /** @deprecated use StorageModel.list instead. */
-    async list(target: string, recursive = true) {
-        if (target.includes('..') || target.includes('//')) throw new Error('Invalid path');
-        try {
-            const stream = this.client.listObjects(this.opts.bucket, target, recursive);
-            return await new Promise<BucketItem[]>((resolve, reject) => {
-                const results: BucketItem[] = [];
-                stream.on('data', (result) => {
-                    if (result.size) {
-                        results.push({
-                            ...result,
-                            prefix: target,
-                            name: result.name.split(target)[1],
-                        });
-                    }
-                });
-                stream.on('end', () => resolve(results));
-                stream.on('error', reject);
-            });
-        } catch (e) {
-            e.stack = new Error().stack;
-            throw e;
-        }
+        return await this.client.send(new DeleteObjectsCommand({
+            Bucket: this.bucket,
+            Delete: {
+                Objects: target.map((i) => ({ Key: i })),
+            },
+        }));
     }
 
     async getMeta(target: string) {
-        if (target.includes('..') || target.includes('//')) throw new Error('Invalid path');
-        try {
-            const result = await this.client.statObject(this.opts.bucket, target);
-            return { ...result.metaData, ...result };
-        } catch (e) {
-            e.stack = new Error().stack;
-            throw e;
-        }
+        target = convertPath(target);
+        const res = await this.client.send(new HeadObjectCommand({
+            Bucket: this.bucket,
+            Key: target,
+        }));
+        return {
+            size: res.ContentLength,
+            lastModified: res.LastModified,
+            etag: res.ETag,
+            metaData: res.Metadata,
+        };
     }
 
     async signDownloadLink(target: string, filename?: string, noExpire = false, useAlternativeEndpointFor?: 'user' | 'judge'): Promise<string> {
-        if (target.includes('..') || target.includes('//')) throw new Error('Invalid path');
-        try {
-            const headers: Record<string, string> = {};
-            if (filename) headers['response-content-disposition'] = `attachment; filename="${encodeRFC5987ValueChars(filename)}"`;
-            const url = await this.client.presignedGetObject(
-                this.opts.bucket,
-                target,
-                noExpire ? 24 * 60 * 60 * 7 : 10 * 60,
-                headers,
-            );
-            if (useAlternativeEndpointFor) return this.replaceWithAlternativeUrlFor[useAlternativeEndpointFor](url);
-            return url;
-        } catch (e) {
-            e.stack = new Error().stack;
-            throw e;
+        target = convertPath(target);
+        const client = this.alternatives[useAlternativeEndpointFor] || this.client;
+        const url = await getSignedUrl(client, new GetObjectCommand({
+            Bucket: this.bucket,
+            Key: target,
+            ResponseContentDisposition: filename ? `attachment; filename="${encodeRFC5987ValueChars(filename)}"` : '',
+        }), {
+            // aliyun s3 will reject download if expires >= 7 days
+            expiresIn: noExpire ? 24 * 60 * 60 * 7 - 1 : 30 * 60,
+        });
+        // using something like /fs/
+        if (useAlternativeEndpointFor && this.replaceWithAlternativeUrlFor[useAlternativeEndpointFor]) {
+            return this.replaceWithAlternativeUrlFor[useAlternativeEndpointFor](url);
         }
+        return url;
+    }
+
+    async isLinkValid(_: string) {
+        return false;
     }
 
     async signUpload(target: string, size: number) {
-        const policy = this.client.newPostPolicy();
-        policy.setBucket(this.opts.bucket);
-        policy.setKey(target);
-        policy.setExpires(new Date(Date.now() + 30 * 60 * 1000));
-        if (size) policy.setContentLengthRange(size - 50, size + 50);
-        const policyResult = await this.client.presignedPostPolicy(policy);
+        const client = this.alternatives.user || this.client;
+        const { url, fields } = await createPresignedPost(client, {
+            Bucket: this.bucket,
+            Key: target,
+            Conditions: [
+                { $key: target },
+                { acl: 'public-read' },
+                { bucket: this.bucket },
+                ['content-length-range', size - 50, size + 50],
+            ],
+            Fields: {
+                acl: 'public-read',
+            },
+            Expires: 600,
+        });
+        if (this.replaceWithAlternativeUrlFor.user) {
+            return {
+                url: this.replaceWithAlternativeUrlFor.user(url),
+                fields,
+            };
+        }
+        return { url, fields };
+    }
+
+    async status() {
         return {
-            url: this.replaceWithAlternativeUrlFor.user(policyResult.postURL),
-            extraFormData: policyResult.formData,
+            type: 'S3',
+            status: !this.error,
+            error: this.error,
+            bucket: this.bucket,
         };
     }
 }
 
-const service = new StorageService();
-global.Hydro.service.storage = service;
-export = service;
+class LocalStorageService {
+    client: null;
+    error = '';
+    dir: string;
+    opts: null;
+    private replaceWithAlternativeUrlFor: Record<'user' | 'judge', (originalUrl: string) => string>;
+
+    constructor(private config: ReturnType<typeof FileSetting>) {
+    }
+
+    async start() {
+        logger.debug('Loading local storage service with path:', this.config.path);
+        await ensureDir(this.config.path);
+        this.dir = this.config.path;
+        this.replaceWithAlternativeUrlFor = {
+            user: parseAlternativeEndpointUrl(this.config.endPointForUser),
+            judge: parseAlternativeEndpointUrl(this.config.endPointForJudge),
+        };
+    }
+
+    async put(target: string, file: string | Buffer | Readable) {
+        target = resolve(this.dir, convertPath(target));
+        await ensureDir(dirname(target));
+        if (typeof file === 'string') await copyFile(file, target);
+        else if (Buffer.isBuffer(file)) await writeFile(target, file);
+        else await writeFile(target, await streamToBuffer(file));
+    }
+
+    async get(target: string, path?: string) {
+        target = resolve(this.dir, convertPath(target));
+        if (!existsSync(target)) throw new Error(`File not found: ${target}`);
+        if (path) await copyFile(target, path);
+        return createReadStream(target);
+    }
+
+    async del(target: MaybeArray<string>) {
+        const targets = (typeof target === 'string' ? [target] : target).map(convertPath);
+        await Promise.all(targets.map((i) => remove(resolve(this.dir, i))));
+    }
+
+    async getMeta(target: string) {
+        target = resolve(this.dir, convertPath(target));
+        const file = await stat(target);
+        return {
+            size: file.size,
+            etag: Buffer.from(target).toString('base64'),
+            lastModified: file.mtime,
+            metaData: {
+                'Content-Type': (target.endsWith('.ans') || target.endsWith('.out'))
+                    ? 'text/plain'
+                    : lookup(target) || 'application/octet-stream',
+                'Content-Length': file.size,
+            },
+        };
+    }
+
+    async signDownloadLink(target: string, filename = '', noExpire = false, useAlternativeEndpointFor?: 'user' | 'judge'): Promise<string> {
+        target = convertPath(target);
+        const url = new URL('https://localhost/storage');
+        url.searchParams.set('target', target);
+        if (filename) url.searchParams.set('filename', filename);
+        const expire = (Date.now() + (noExpire ? 7 * 24 * 3600 : 600) * 1000).toString();
+        url.searchParams.set('expire', expire);
+        url.searchParams.set('secret', md5(`${target}/${expire}/${this.config.secret}`));
+        if (useAlternativeEndpointFor) return this.replaceWithAlternativeUrlFor[useAlternativeEndpointFor](url.toString());
+        return `/${url.toString().split('localhost/')[1]}`;
+    }
+
+    async isLinkValid(link: string) {
+        const parts = link.split('/');
+        const secret = parts.pop();
+        parts.push(this.config.secret);
+        const expected = md5(parts.join('/'));
+        return expected === secret;
+    }
+
+    async signUpload() {
+        throw new Error('Not implemented');
+    }
+
+    async status() {
+        return {
+            type: 'Local',
+            status: !this.error,
+            error: this.error,
+            bucket: 'Hydro',
+            dir: this.config.path,
+        };
+    }
+}
+
+let service;
+
+export async function apply(ctx: Context, config: ReturnType<typeof FileSetting>) {
+    if (config.type === 's3') {
+        service = new RemoteStorageService(config);
+    } else {
+        service = new LocalStorageService(config);
+    }
+    await service.start();
+    await ctx.inject(['server'], ({ server }) => {
+        let endpoint = config.endPoint;
+        if (config.type === 's3' && !config.pathStyle) {
+            try {
+                const parsed = new URL(config.endPoint);
+                parsed.hostname = `${config.bucket}.${parsed.hostname}`;
+                endpoint = parsed.toString();
+            } catch (e) {
+                logger.warn('Failed to parse file endpoint');
+            }
+        }
+        const proxyMiddleware = proxy('/fs', {
+            target: endpoint,
+            changeOrigin: true,
+            rewrite: (p) => p.replace('/fs', ''),
+        });
+        server.addCaptureRoute('/fs/', async (c, next) => {
+            if (c.request.search.toLowerCase().includes('x-amz-credential')) {
+                c.nolog = true;
+                return await proxyMiddleware(c, next);
+            }
+            c.request.path = c.path = c.path.split('/fs')[1];
+            return await next();
+        });
+    });
+    ctx.provide('storage', service);
+}
+
+declare module 'cordis' {
+    interface Context {
+        storage: RemoteStorageService | LocalStorageService;
+    }
+}
+
+/** @deprecated use ctx.storage instead */
+const serviceProxy = new Proxy({}, {
+    get(self, key) {
+        return service[key];
+    },
+}) as RemoteStorageService | LocalStorageService;
+export default serviceProxy;

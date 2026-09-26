@@ -26,7 +26,6 @@ class RatingCalculator {
         }
     }
 
-    // eslint-disable-next-line class-methods-use-this
     calP(a: User, b: User) {
         return 1 / (1 + 10 ** ((b.old - a.old) / 400));
     }
@@ -92,14 +91,14 @@ class RatingCalculator {
 }
 
 interface RatingInputUser {
-    old: number,
-    uid: number,
-    rank: number,
+    old: number;
+    uid: number;
+    rank: number;
 }
 
 interface RatingOutputUser {
-    new: number,
-    uid: number,
+    new: number;
+    uid: number;
 }
 
 function calculate(users: RatingInputUser[]): RatingOutputUser[] {
@@ -119,6 +118,4 @@ function calculate(users: RatingInputUser[]): RatingOutputUser[] {
     return calculator.calculate() as RatingOutputUser[];
 }
 
-export = calculate;
-
-global.Hydro.lib.rating = calculate;
+export default calculate;

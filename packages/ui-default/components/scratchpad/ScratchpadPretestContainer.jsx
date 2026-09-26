@@ -1,13 +1,11 @@
+import { Allotment } from 'allotment';
+import { AnsiUp } from 'ansi_up';
 import React from 'react';
 import { connect } from 'react-redux';
-import AnsiUp from 'ansi_up';
-
-import i18n from 'vj/utils/i18n';
 import Icon from 'vj/components/react/IconComponent';
-import Panel from './PanelComponent';
+import { i18n } from 'vj/utils';
 import DataInput from './DataInputComponent';
-
-const AU = new AnsiUp();
+import Panel from './PanelComponent';
 
 const mapStateToProps = (state) => ({
   input: state.pretest.input,
@@ -39,7 +37,7 @@ export default connect(mapStateToProps, mapDispatchToProps)(class ScratchpadPret
           </span>
         )}
       >
-        <div className="flex-row flex-fill">
+        <Allotment>
           <DataInput
             title={i18n('Input')}
             value={this.props.input}
@@ -47,10 +45,10 @@ export default connect(mapStateToProps, mapDispatchToProps)(class ScratchpadPret
           />
           <DataInput
             title={i18n('Output')}
-            value={AU.ansi_to_html(this.props.output)}
+            value={new AnsiUp().ansi_to_html(this.props.output)}
             html
           />
-        </div>
+        </Allotment>
       </Panel>
     );
   }

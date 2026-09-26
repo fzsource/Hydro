@@ -1,24 +1,21 @@
-import crypto from 'crypto';
 import { dump } from 'js-yaml';
+import { cloneDeepWith } from 'lodash';
 import superagent from 'superagent';
-import tx2 from 'tx2';
 import type { StatusUpdate } from '@hydrooj/utils/lib/sysinfo';
 import * as sysinfo from '@hydrooj/utils/lib/sysinfo';
-import { Time } from '@hydrooj/utils/lib/utils';
+import { Context } from '../context';
 import { Logger } from '../logger';
-import * as bus from './bus';
+import bus from './bus';
 import db from './db';
 
 const coll = db.collection('status');
 const logger = new Logger('monitor');
 
-function crypt(str: string) {
-    const cipher = crypto.createCipheriv('des-ecb', 'hydro-oj', ''); // lgtm [js/hardcoded-credentials]
-    let encrypted = cipher.update(str, 'utf8', 'hex');
-    encrypted += cipher.final('hex');
-    return encrypted;
-}
-
+// We use this endpoint to push security notifications based on
+// component versions and configurations to administrators.
+// Removing this logic is not recommended.
+// 我们使用此端点向服务器管理员根据所安装的版本与配置推送安全通知。
+// 不建议删除此逻辑。
 export async function feedback(): Promise<[string, StatusUpdate]> {
     const {
         system, domain, document, user, record,
@@ -27,13 +24,13 @@ export async function feedback(): Promise<[string, StatusUpdate]> {
     const [mid, $update, inf] = await sysinfo.update();
     const [installId, name, url] = system.getMany(['installid', 'server.name', 'server.url']);
     const [domainCount, userCount, problemCount, discussionCount, recordCount] = await Promise.all([
-        domain.getMulti().count(),
-        user.getMulti().count(),
-        document.coll.find({ docType: document.TYPE_PROBLEM }).count(),
-        document.coll.find({ docType: document.TYPE_DISCUSSION }).count(),
-        record.coll.find().count(),
+        domain.coll.estimatedDocumentCount(),
+        user.coll.estimatedDocumentCount(),
+        document.coll.countDocuments({ docType: document.TYPE_PROBLEM }),
+        document.coll.countDocuments({ docType: document.TYPE_DISCUSSION }),
+        record.coll.estimatedDocumentCount(),
     ]);
-    const payload = crypt(dump({
+    const info: Record<string, any> = {
         mid: mid.toString(),
         version,
         name,
@@ -43,21 +40,30 @@ export async function feedback(): Promise<[string, StatusUpdate]> {
         problemCount,
         discussionCount,
         recordCount,
-        addons: global.addons,
+        addons: Object.values(global.addons),
         memory: inf.memory,
         osinfo: inf.osinfo,
         cpu: inf.cpu,
-    }, {
-        replacer: (key, value) => {
-            if (typeof value === 'function') return '';
-            return value;
-        },
-    }));
+    };
+    try {
+        let host = system.get('hydrojudge.sandbox_host') || 'http://localhost:5050/';
+        if (!host.endsWith('/')) host += '/';
+        const res = await superagent.get(`${host}version`);
+        info.sandbox = res.body;
+    } catch (e) { }
+    try {
+        const status = await db.db.admin().serverStatus();
+        info.dbVersion = status.version;
+    } catch (e) { }
+    await bus.serial('monitor/collect', info);
+    const payload = dump(cloneDeepWith(info, (value) => typeof value === 'function' ? '' : undefined));
+    if (process.env.CI) return [mid, $update];
     superagent.post(`${system.get('server.center')}/report`)
         .send({ installId, payload })
         .then((res) => {
             if (res.body.updateUrl?.startsWith('https://')) system.set('server.center', res.body.updateUrl);
             if (res.body.notification) global.Hydro.model.message.sendNotification(res.body.notification);
+            if (res.body.reassignId) system.set('installid', res.body.reassignId);
         })
         .catch(() => logger.debug('Cannot connect to hydro center.'));
     return [mid, $update];
@@ -70,7 +76,7 @@ export async function update() {
         updateAt: new Date(),
         reqCount: 0,
     };
-    await bus.serial('monitor/update', 'server', $set);
+    await bus.parallel('monitor/update', 'server', $set);
     await coll.updateOne(
         { mid, type: 'server' },
         { $set },
@@ -80,7 +86,7 @@ export async function update() {
 
 export async function updateJudge(args) {
     const $set = { ...args, updateAt: new Date() };
-    await bus.serial('monitor/update', 'judge', $set);
+    await bus.parallel('monitor/update', 'judge', $set);
     return await coll.updateOne(
         { mid: args.mid, type: 'judge' },
         { $set },
@@ -88,32 +94,14 @@ export async function updateJudge(args) {
     );
 }
 
-if (process.env.NODE_APP_INSTANCE === '0') {
-    bus.on('app/started', async () => {
-        sysinfo.get().then((info) => {
-            coll.updateOne(
-                { mid: info.mid, type: 'server' },
-                { $set: { ...info, updateAt: new Date(), type: 'server' } },
-                { upsert: true },
-            );
-            feedback();
-            setInterval(update, 1800 * 1000);
-        });
-        const taskColl = db.collection('task');
-        let taskCount = await taskColl.find().count();
-        const recordColl = db.collection('record');
-        let recordCount = await recordColl.find({
-            _id: { $gte: Time.getObjectID(new Date(Date.now() - 60 * 1000)) },
-        }).count();
-        tx2.metric('task', () => taskCount);
-        tx2.metric('submission', () => recordCount);
-        setInterval(() => {
-            taskColl.find().count().then((c) => { taskCount = c; });
-            recordColl.find({
-                _id: { $gte: Time.getObjectID(new Date(Date.now() - 60 * 1000)) },
-            }).count().then((c) => { recordCount = c; });
-        }, 1000);
-    });
+export async function apply(ctx: Context) {
+    if (process.env.NODE_APP_INSTANCE !== '0' || process.env.CI) return;
+    const info = await sysinfo.get();
+    coll.updateOne(
+        { mid: info.mid, type: 'server' },
+        { $set: { ...info, updateAt: new Date(), type: 'server' } },
+        { upsert: true },
+    );
+    feedback();
+    return ctx.interval(update, 1800 * 1000); // eslint-disable-line
 }
-
-global.Hydro.service.monitor = { feedback, update, updateJudge };

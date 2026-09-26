@@ -1,27 +1,51 @@
-/* eslint-disable no-await-in-loop */
 import path from 'path';
-import fs from 'fs-extra';
-import yaml from 'js-yaml';
-import { max, sum } from 'lodash';
-import readYamlCases, { convertIniConfig } from '@hydrooj/utils/lib/cases';
-import { normalizeSubtasks, readSubtasksFromFiles } from '@hydrooj/utils/lib/common';
-import { changeErrorType } from '@hydrooj/utils/lib/utils';
+import {
+    convertIniConfig, LangConfig, normalizeSubtasks, ProblemConfigFile, readSubtasksFromFiles,
+} from '@hydrooj/common';
+import { readYamlCases } from '@hydrooj/common/cases';
+import {
+    changeErrorType, fs, yaml,
+} from '@hydrooj/utils';
 import { getConfig } from './config';
 import { FormatError, SystemError } from './error';
+import { NextFunction, ParsedConfig } from './interface';
 import { ensureFile, parseMemoryMB } from './utils';
 
 function isValidConfig(config) {
-    if (config.count > (getConfig('testcases_max') || 100)) {
+    if (config.type !== 'objective' && config.count > (getConfig('testcases_max') || 100)) {
         throw new FormatError('Too many testcases. Cancelled.');
     }
-    const time = sum(config.subtasks.map((subtask) => sum(subtask.cases.map((c) => c.time))));
+    if (config.type === 'communication') {
+        config.num_processes ??= 2;
+        if (!Number.isInteger(config.num_processes) || config.num_processes <= 0) {
+            throw new FormatError('Number of processes must be a positive integer for communication type.');
+        }
+        if (config.num_processes > getConfig('processLimit')) {
+            throw new FormatError('Number of processes larger than processLimit');
+        }
+    }
+    const time = config.num_processes * Math.sum(...config.subtasks.flatMap((subtask) => subtask.cases.map((c) => c.time)));
     if (time > (getConfig('total_time_limit') || 60) * 1000) {
         throw new FormatError('Total time limit longer than {0}s. Cancelled.', [+getConfig('total_time_limit') || 60]);
     }
-    const memMax = max(config.subtasks.map((subtask) => max(subtask.cases.map((c) => c.memory))));
+    const memMax = Math.max(...config.subtasks.flatMap((subtask) => subtask.cases.map((c) => c.memory)));
     if (memMax > parseMemoryMB(getConfig('memoryMax'))) throw new FormatError('Memory limit larger than memory_max');
     if (!['default', 'strict'].includes(config.checker_type || 'default') && !config.checker) {
         throw new FormatError('You did not specify a checker.');
+    }
+    if (config.type === 'interactive' && !config.interactor) {
+        throw new FormatError('Interactive problems require an interactor.');
+    }
+    if (config.multi_pass) {
+        if (!Number.isInteger(config.multi_pass) || config.multi_pass < 2 || config.multi_pass > 20) {
+            throw new FormatError('Multi Pass must be between 2 and 20.');
+        }
+        if (!['default', 'interactive'].includes(config.type)) {
+            throw new FormatError('Multi Pass only supported on default and interactive problems.');
+        }
+        if (config.type === 'default' && !['testlib', 'kattis'].includes(config.checker_type)) {
+            throw new FormatError('Multi Pass on default problems requires a testlib or kattis checker.');
+        }
     }
 }
 
@@ -36,33 +60,16 @@ async function collectFiles(folder: string) {
     return files;
 }
 
-export async function processTestdata(folder: string) {
-    let files = await fs.readdir(folder);
-    if (files.length <= 2) {
-        if (files.length === 2) files.splice(files.indexOf('version'), 1);
-        if (fs.statSync(path.resolve(folder, files[0])).isDirectory()) {
-            folder = path.resolve(folder, files[0]);
-            files = await fs.readdir(folder);
-        }
-    }
-    const ini = files.filter((i) => i.toLowerCase() === 'config.ini')[0];
-    if (!ini) return;
-    const t = fs.readFileSync(path.resolve(folder, ini), 'utf8');
-    await fs.writeFile(path.resolve(folder, 'config.ini'), t.toLowerCase());
-    for (const i of files) {
-        if (i.toLowerCase() === 'input') await fs.rename(`${folder}/${i}`, `${folder}/input`);
-        if (i.toLowerCase() === 'output') await fs.rename(`${folder}/${i}`, `${folder}/output`);
-    }
-    await Promise.all(['input', 'output'].flatMap(async (f) => {
-        const dir = path.resolve(folder, f);
-        const sf = await fs.readdir(dir);
-        return sf
-            .filter((i) => i !== i.toLowerCase())
-            .map((i) => fs.rename(`${dir}/${i}`, `${dir}/${i.toLowerCase()}`));
-    }));
+interface Args {
+    next: NextFunction;
+    key: string;
+    isSelfSubmission: boolean;
+    trusted: boolean;
+    lang: string;
+    langConfig?: LangConfig;
 }
 
-export default async function readCases(folder: string, cfg: Record<string, any> = {}, args) {
+export default async function readCases(folder: string, cfg: ProblemConfigFile = {}, args: Args): Promise<ParsedConfig> {
     const iniConfig = path.resolve(folder, 'config.ini');
     const yamlConfig = path.resolve(folder, 'config.yaml');
     const ymlConfig = path.resolve(folder, 'config.yml');
@@ -76,30 +83,35 @@ export default async function readCases(folder: string, cfg: Record<string, any>
     };
     try {
         if (fs.existsSync(yamlConfig)) {
-            Object.assign(config, yaml.load(fs.readFileSync(yamlConfig).toString()));
+            Object.assign(config, yaml.load(await fs.readFile(yamlConfig, 'utf-8')));
         } else if (fs.existsSync(ymlConfig)) {
-            Object.assign(config, yaml.load(fs.readFileSync(ymlConfig).toString()));
+            Object.assign(config, yaml.load(await fs.readFile(ymlConfig, 'utf-8')));
         } else if (fs.existsSync(iniConfig)) {
-            Object.assign(config, convertIniConfig(fs.readFileSync(iniConfig).toString()));
+            Object.assign(config, convertIniConfig(await fs.readFile(iniConfig, 'utf-8')));
         }
     } catch (e) {
         throw changeErrorType(e, FormatError);
     }
+    const timeRate = +(config.time_limit_rate?.[args.lang] || args.langConfig?.time_limit_rate || 1) || 1;
+    const memoryRate = +(config.memory_limit_rate?.[args.lang] || args.langConfig?.memory_limit_rate || 1) || 1;
     const checkFile = ensureFile(folder);
     const result = await readYamlCases(config, checkFile)
         .catch((e) => { throw changeErrorType(e, FormatError); });
-    result.count = result.outputs?.length || Math.sum((result.subtasks || []).map((s) => s.cases.length));
+    result.count = Object.keys(result.answers || {}).length || Math.sum((result.subtasks || []).map((s) => s.cases.length));
     if (!result.count) {
         try {
             result.subtasks = readSubtasksFromFiles(await collectFiles(folder), cfg);
             result.count = Math.sum(result.subtasks.map((i) => i.cases.length));
-            if (cfg.isSelfSubmission) args.next?.({ message: { message: 'Found {0} testcases.', params: [result.count] } });
+            if (args.isSelfSubmission) args.next?.({ message: { message: 'Found {0} testcases.', params: [result.count] } });
         } catch (e) {
             throw new SystemError('Cannot parse testdata.', [e.message, ...(e.params || [])]);
         }
     }
-    result.subtasks = normalizeSubtasks(result.subtasks || [], checkFile, config.time, config.memory);
+    if (result.detail === true) result.detail = 'full';
+    else if (result.detail === false) result.detail = 'case';
+    else result.detail ||= 'full';
+    result.subtasks = normalizeSubtasks(result.subtasks || [], checkFile, config.time, config.memory, false, timeRate, memoryRate);
     if (result.key && args.key !== result.key) throw new FormatError('Incorrect secret key');
-    if (!result.key) isValidConfig(result);
+    if (!result.key && !args.trusted) isValidConfig(result);
     return result;
 }

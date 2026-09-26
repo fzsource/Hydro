@@ -1,10 +1,9 @@
-import React from 'react';
-import PropTypes from 'prop-types';
-import { connect } from 'react-redux';
 import classNames from 'classnames';
+import PropTypes from 'prop-types';
+import React from 'react';
+import { connect } from 'react-redux';
 import Icon from 'vj/components/react/IconComponent';
-
-import request from 'vj/utils/request';
+import { request } from 'vj/utils';
 
 const mapStateToProps = (state) => ({
   activeId: state.activeId,
@@ -51,11 +50,11 @@ export default connect(mapStateToProps, mapDispatchToProps)(class MessagePadInpu
   componentDidUpdate(prevProps) {
     this.focusInput = (
       this.props.activeId !== prevProps.activeId
-      || prevProps.isPosting !== this.props.isPosting && this.props.isPosting === false
+      || (prevProps.isPosting !== this.props.isPosting && this.props.isPosting === false)
     );
     if (this.focusInput) {
       const { scrollX, scrollY } = window;
-      this.refs.input.focus();
+      this.state.ref?.focus();
       window.scrollTo(scrollX, scrollY);
     }
   }
@@ -81,7 +80,7 @@ export default connect(mapStateToProps, mapDispatchToProps)(class MessagePadInpu
       <div className={cn}>
         <div className="messagepad__textarea-container">
           <textarea
-            ref="input"
+            ref={(ref) => this.setState({ ...this.state, ref })}
             data-markdown
             disabled={this.props.isPosting}
             value={this.props.inputValue}

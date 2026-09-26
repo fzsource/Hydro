@@ -1,85 +1,3 @@
-fontFamily:
-  type:
-    Open Sans: Open Sans
-    Seravek: Seravek
-    Segoe UI: Segoe UI
-    Verdana: Verdana
-    PingFang SC: PingFang SC
-    Hiragino Sans GB: Hiragino Sans GB
-    Microsoft Yahei: Microsoft Yahei
-    WenQuanYi Micro Hei: WenQuanYi Micro Hei
-    sans: sans
-    XiaoLai SC: 小赖 SC
-  family: setting_display
-  category: preference
-  value: Open Sans
-codeFontFamily:
-  type:
-    monaco: Monaco
-    Source Code Pro: Source Code Pro
-    Consolas: Consolas
-    Lucida Console: Lucida Console
-    Fira Code: Fira Code
-    Roboto Mono: Roboto Mono
-    Inconsolata: Inconsolata
-    Hack: Hack
-    Jetbrains Mono: Jetbrains Mono
-    DM Mono: DM Mono
-    Ubuntu Mono: Ubuntu Mono
-    PT Mono: PT Mono
-    SF Mono: SF Mono
-  family: setting_display
-  category: preference
-  value: Source Code Pro
-footer_extra_html:
-  type: textarea
-  name: footer_extra_html
-  desc: Footer Extra HTML
-  default: ''
-nav_logo_dark:
-  type: text
-  name: nav_logo_dark
-  desc: Nav Logo Dark
-  default: /components/navigation/nav-logo-small_dark.png
-nav_logo_dark_2x:
-  type: text
-  name: nav_logo_dark_2x
-  desc: Nav Logo Dark@2x
-  default: /components/navigation/nav-logo-small@2x_dark.png
-preferredEditorType:
-  type:
-    wysiwyg: WYSIWYG
-    ir: Instant Rendering
-    sv: Split View
-    monaco: Monaco Editor
-  family: markdown
-  category: preference
-  value: sv
-monacoTheme:
-  type:
-    vs-dark: VS Dark
-    vs-light: VS Light
-  category: preference
-  value: vs-light
-  family: markdown
-theme:
-  type:
-    light: Light
-    dark: Dark
-  category: preference
-  value: light
-  family: setting_display
-showInvisibleChar:
-  type: boolean
-  family: highlight
-  desc: show invisible characters when formatting code
-  category: preference
-formatCode:
-  type: boolean
-  family: highlight
-  desc: Auto format code
-  category: preference
-  value: true
 about:
   type: markdown
   name: about
@@ -106,11 +24,7 @@ about:
     无论您在何时使用我们的服务，我们都力求让您能够访问自己的个人信息。如果这些信息有误，我们会努力通过各种方式让您快速更新信息或删除信息。
     在更新您的个人信息时，我们可能会要求您先验证自己的身份，然后再处理您的请求。  
     我们力求对服务进行完善的维护，以保护信息免遭意外或恶意的破坏。因此，当您从我们的服务中删除信息后，
-    我们可能不会立即从在用的服务器中删除这些信息的残留副本，也可能不会从备份系统中删除相应的信息。  
-
-    #### 4. 信息安全
-    我们为您提供SSL加密访问服务，您可以通过SSL(https)使用我们的服务，这可以很大程度上保障在传输过程中您信息的安全。  
-    对于敏感数据（如您的密码），我们承诺在存储时进行高强度不可逆加密。{{ name }} 的管理员、维护人员等均不能够访问到敏感数据的明文，所有操作均无人工介入。  
+    我们可能不会立即从在用的服务器中删除这些信息的残留副本，也可能不会从备份系统中删除相应的信息。    
 
     # tos 服务条款
     #### 0. 欢迎使用 {{ name }}

@@ -7,11 +7,12 @@
   </div>
   <div class="section__body">
     {{ noscript_note.render() }}
-    <p name="messages"></p>
+    <pre name="messages"></pre>
     {{ form.form_textarea({
         columns:null,
         label:'Users',
-        name:'users'
+        name:'users',
+        nospellcheck: true
         }) }}
     <div class="row"><div class="column">
       <button name="preview" class="rounded primary button">{{ _('Preview') }}</button>

@@ -1,14 +1,12 @@
 import 'jquery.easing';
 
-import { AutoloadPage } from 'vj/misc/Page';
+import $ from 'jquery';
+import { confirm } from 'vj/components/dialog';
 import CommentBox from 'vj/components/discussion/CommentBox';
-import { ConfirmDialog } from 'vj/components/dialog';
-
-import delay from 'vj/utils/delay';
-import { slideDown, slideUp } from 'vj/utils/slide';
-import request from 'vj/utils/request';
-import i18n from 'vj/utils/i18n';
-import tpl from 'vj/utils/tpl';
+import { AutoloadPage } from 'vj/misc/Page';
+import {
+  delay, i18n, request, slideDown, slideUp,
+} from 'vj/utils';
 
 const $replyTemplate = $('.commentbox-container').eq(0).clone();
 
@@ -107,7 +105,6 @@ async function onCommentClickReplyComment(ev, options: any = {}) {
 }
 
 async function onCommentClickReplyReply(ev) {
-  console.log(ev);
   const $evTarget = $(ev.currentTarget);
   const $mediaBody = $evTarget.closest('.media__body');
   const uid = $mediaBody
@@ -165,10 +162,7 @@ async function onCommentClickDelete(type, ev) {
   const message = (type === 'comment')
     ? 'Confirm deleting this comment? Its replies will be deleted as well.'
     : 'Confirm deleting this reply?';
-  const action = await new ConfirmDialog({
-    $body: tpl.typoMsg(i18n(message)),
-  }).open();
-  if (action !== 'yes') return;
+  if (!await confirm(i18n(message))) return;
 
   const $evTarget = $(ev.currentTarget);
   const form = JSON.parse($evTarget.attr('data-form'));

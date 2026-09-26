@@ -1,16 +1,15 @@
-/* eslint-disable @typescript-eslint/no-use-before-define */
-import { ObjectID } from 'mongodb';
+/* eslint-disable ts/no-use-before-define */
+import { ObjectId } from 'mongodb';
+import Schema from 'schemastery';
 import blacklist from '../model/blacklist';
 import * as discussion from '../model/discussion';
 import * as document from '../model/document';
-import user from '../model/user';
+import UserModel from '../model/user';
 import db from '../service/db';
-
-export const description = 'Add blacklist by ip, uid';
 
 async function _address(
     ip: string,
-    bset: Set<string>, uset: Set<number>, dset: Set<ObjectID>,
+    bset: Set<string>, uset: Set<number>, dset: Set<ObjectId>,
     dryrun: boolean, report: Function,
 ) {
     if (bset.has(ip)) return;
@@ -26,8 +25,8 @@ async function _address(
 }
 
 async function _discussion(
-    domainId: string, did: ObjectID,
-    bset: Set<string>, uset: Set<number>, dset: Set<ObjectID>,
+    domainId: string, did: ObjectId,
+    bset: Set<string>, uset: Set<number>, dset: Set<ObjectId>,
     dryrun: boolean, report: Function,
 ) {
     if (dset.has(did)) return;
@@ -42,12 +41,12 @@ async function _discussion(
 
 async function _user(
     uid: number,
-    bset: Set<string>, uset: Set<number>, dset: Set<ObjectID>,
+    bset: Set<string>, uset: Set<number>, dset: Set<ObjectId>,
     dryrun: boolean, report: Function,
 ) {
     if (uset.has(uid)) return;
     uset.add(uid);
-    const udoc = await user.getById('system', uid);
+    const udoc = await UserModel.getById('system', uid);
     if (!udoc) return;
     report({ message: `user ${udoc._id} ${udoc.uname}` });
     await _address(udoc._loginip, bset, uset, dset, dryrun, report);
@@ -58,28 +57,31 @@ async function _user(
         tasks.push(_discussion(ddoc.domainId, ddoc.docId, bset, uset, dset, dryrun, report));
     }
     await Promise.all(tasks);
-    if (!dryrun) await user.ban(uid);
+    if (!dryrun) await UserModel.ban(uid);
 }
 
-export async function run({
-    // eslint-disable-next-line @typescript-eslint/no-shadow
-    address = null, discuss = null, user = null, dryrun = true,
-}, report) {
-    if (address) await _address(address, new Set(), new Set(), new Set(), dryrun, report);
-    if (discuss) {
-        await _discussion(
-            discuss.domainId, new ObjectID(discuss.did),
-            new Set(), new Set(), new Set(), dryrun, report,
-        );
-    }
-    if (user) await _user(user, new Set(), new Set(), new Set(), dryrun, report);
-}
-
-export const validate = {
-    address: 'string?',
-    discuss: 'string?',
-    user: 'number?',
-    dryrun: 'boolean?',
-};
-
-global.Hydro.script.blacklist = { run, description, validate };
+export const apply = (ctx) => ctx.addScript(
+    'blacklist', 'Add blacklist by ip, uid',
+    Schema.object({
+        address: Schema.string(),
+        discuss: Schema.object({
+            domainId: Schema.string(),
+            did: Schema.string(),
+        }),
+        user: Schema.number(),
+        dryrun: Schema.boolean(),
+    }),
+    async ({
+        address = null, discuss = null, user = null, dryrun = true,
+    }, report) => {
+        if (address) await _address(address, new Set(), new Set(), new Set(), dryrun, report);
+        if (discuss) {
+            await _discussion(
+                discuss.domainId, new ObjectId(discuss.did),
+                new Set(), new Set(), new Set(), dryrun, report,
+            );
+        }
+        if (user) await _user(user, new Set(), new Set(), new Set(), dryrun, report);
+        return true;
+    },
+);

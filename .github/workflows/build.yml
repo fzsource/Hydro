@@ -4,6 +4,10 @@ on:
 - push
 - pull_request
 
+permissions:
+  # Provenance generation in GitHub Actions requires "write" access to the "id-token"
+  id-token: write
+
 env:
   CI: true
   YARN_ENABLE_IMMUTABLE_INSTALLS: 'false'
@@ -11,44 +15,68 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      LICENSE_KEY: ${{ secrets.MAXMIND_KEY }}
-      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
     - name: Check out
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
       with:
         submodules: recursive
+        fetch-depth: 2
     - name: Set up Node
-      uses: actions/setup-node@v1
+      uses: actions/setup-node@v4
       with:
-        node-version: 14.x
+        node-version: 22
     - name: Get yarn cache directory path
       id: yarn-cache-dir-path
       run: echo "::set-output name=dir::$(yarn config get cacheFolder)"
-    - uses: actions/cache@v3
-      id: yarn-cache
+    - uses: actions/cache@v4
       with:
         path: |
           ${{ steps.yarn-cache-dir-path.outputs.dir }}
           yarn.lock
+          .cache
           **/tsconfig.tsbuildinfo
-        key: yarn-${{ hashFiles('**/package.json') }}
+        key: cache-${{ github.ref }}-${{ github.sha }}
         restore-keys: |
-          yarn-
+          cache-${{ github.ref }}-
+          cache-
+    - name: Clear Cache
+      if: "contains(github.event.head_commit.message, 'skip-cache')"
+      run: |
+        rm -rf node_modules yarn.lock **/tsconfig.tsbuildinfo
     - name: Config And Install
       run: |
-        [[ ! -z "${{secrets.NPM_TOKEN}}" ]] && echo "npmAuthToken: ${{secrets.NPM_TOKEN}}" >> .yarnrc.yml
         git config --global user.name undefined
         git config --global user.email i@undefined.moe
+        yarn set version 4.13.0
         yarn
+        yarn dedupe
+        node build/prepare.js
+      env:
+        LICENSE_KEY: ${{ secrets.MAXMIND_KEY }}
+    - name: Get specific changed files
+      id: ui-changed-files
+      uses: tj-actions/changed-files@v41
+      with:
+        files: |
+          /package.json
+          .eslint*
+          packages/ui-default/**
+          packages/utils/**
+          .github/workflows/**
     - name: Build And Lint
       run: |
-        yarn build:ui:gulp
-        parallel --tty -j+0 yarn ::: lint:ci lint:ui:ci build build:ui:production:webpack test
+        yarn build:ui:iconfont # icon font file needed for types
+        if [[ ${{ steps.ui-changed-files.outputs.any_changed }} == true ]] || [[ $(npm info @hydrooj/ui-default version) != $(node -e 'console.log(require("./packages/ui-default/package.json").version)') ]]
+        then
+          parallel --tty -j+0 yarn ::: lint:ci build build:ui:production:webpack test
+        else
+          parallel --tty -j+0 yarn ::: lint:ci build test
+        fi
+      env:
+        SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
     - name: Publish
       if: ${{ github.event_name == 'push' }}
-      run: node build/publish.js
+      run: node -r @hydrooj/register build/publish.ts
     # - name: Benchmark
     #   run: yarn benchmark
     # - name: Benchmark result

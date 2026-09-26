@@ -1,35 +1,33 @@
-import React from 'react';
 import classNames from 'classnames';
+import _ from 'lodash';
+import moment from 'moment';
+import React from 'react';
 import { connect } from 'react-redux';
 import TimeAgo from 'timeago-react';
-import moment from 'moment';
-import _ from 'lodash';
+import { STATUS_CODES, STATUS_SCRATCHPAD_SHORT_TEXTS, STATUS_SCRATCHPAD_SHOW_DETAIL_FLAGS, STATUS_TEXTS } from 'vj/constant/record';
+import {
+  emulateAnchorClick, i18n, mongoId, substitute,
+} from 'vj/utils';
 
-import substitute from 'vj/utils/substitute';
-import emulateAnchorClick from 'vj/utils/emulateAnchorClick';
-import { parse as parseMongoId } from 'vj/utils/mongoId';
-import i18n from 'vj/utils/i18n';
-import * as recordEnum from 'vj/constant/record';
-
-const shouldShowDetail = (data) => recordEnum.STATUS_SCRATCHPAD_SHOW_DETAIL_FLAGS[data.status];
+const shouldShowDetail = (data) => STATUS_SCRATCHPAD_SHOW_DETAIL_FLAGS[data.status] && data.testCases?.length;
 
 const getRecordDetail = (data) => {
   if (!shouldShowDetail(data)) {
     return (
-      <span className={`record-status--text ${recordEnum.STATUS_CODES[data.status]}`}>
-        {recordEnum.STATUS_TEXTS[data.status]}
+      <span className={`record-status--text ${STATUS_CODES[data.status]}`}>
+        {STATUS_TEXTS[data.status]}
       </span>
     );
   }
   const stat = _.pick(
     _.groupBy(data.testCases || [], 'status'),
-    _.keys(recordEnum.STATUS_SCRATCHPAD_SHORT_TEXTS),
+    _.keys(STATUS_SCRATCHPAD_SHORT_TEXTS),
   );
-  return _.map(recordEnum.STATUS_SCRATCHPAD_SHORT_TEXTS, (text, status) => {
+  return _.map(STATUS_SCRATCHPAD_SHORT_TEXTS, (text, status) => {
     const count = (stat[status] && stat[status].length) || 0;
     const cn = classNames('icol icol--stat', {
       'record-status--text': count > 0,
-      [recordEnum.STATUS_CODES[data.status]]: count > 0,
+      [STATUS_CODES[data.status]]: count > 0,
     });
     return (
       <span key={text} className={cn}>
@@ -59,12 +57,12 @@ export default connect(mapStateToProps, null, mergeProps)(class ScratchpadRecord
 
   render() {
     const { data } = this.props;
-    const submitAt = parseMongoId(data._id).timestamp * 1000;
+    const submitAt = mongoId(data._id).timestamp * 1000;
     // Is pretest
     return data.contest?.toString() === '000000000000000000000000' ? null : (
       <tr onClick={(ev) => this.handleRowClick(ev, data._id)}>
-        <td className={`col--detail record-status--border ${recordEnum.STATUS_CODES[data.status]}`}>
-          <span className={`icon record-status--icon ${recordEnum.STATUS_CODES[data.status]}`}></span>
+        <td className={`col--detail record-status--border ${STATUS_CODES[data.status]}`}>
+          <span className={`icon record-status--icon ${STATUS_CODES[data.status]}`}></span>
           <span className="icol icol--pretest"></span>
           {getRecordDetail(data)}
         </td>

@@ -1,17 +1,33 @@
-import { AutoloadPage } from 'vj/misc/Page';
+import { nanoid } from 'nanoid';
 import { InfoDialog } from 'vj/components/dialog';
 import VjNotification from 'vj/components/notification/index';
-import ReconnectingWebsocket from 'reconnecting-websocket';
-import { FLAG_ALERT } from 'vj/constant/message';
-import i18n from 'vj/utils/i18n';
-import tpl from 'vj/utils/tpl';
-import { nanoid } from 'nanoid';
+import {
+  FLAG_ALERT, FLAG_I18N, FLAG_INFO, FLAG_RICHTEXT,
+} from 'vj/constant/message';
+import { AutoloadPage } from 'vj/misc/Page';
+import { i18n, tpl } from 'vj/utils';
+import Sock from '../socket';
 
+let previous: VjNotification;
+const processI18n = (msg) => {
+  if (msg.mdoc.flag & FLAG_I18N) {
+    try {
+      msg.mdoc.content = JSON.parse(msg.mdoc.content);
+      if (msg.mdoc.content.url) msg.mdoc.url = msg.mdoc.content.url;
+      if (msg.mdoc.content.avatar) msg.mdoc.avatar = msg.mdoc.content.avatar;
+      msg.mdoc.content = i18n(msg.mdoc.content.message, ...msg.mdoc.content.params);
+    } catch (e) {
+      msg.mdoc.content = i18n(msg.mdoc.content);
+    }
+  }
+  return msg;
+};
 const onmessage = (msg) => {
   console.log('Received message', msg);
+  msg = processI18n(msg);
   if (msg.mdoc.flag & FLAG_ALERT) {
     // Is alert
-    return new InfoDialog({
+    new InfoDialog({
       cancelByClickingBack: false,
       $body: tpl`
         <div class="typo">
@@ -19,19 +35,56 @@ const onmessage = (msg) => {
           <p>${i18n(msg.mdoc.content)}</p>
         </div>`,
     }).open();
+    return false;
   }
+  if (msg.mdoc.flag & FLAG_INFO) {
+    if (previous) previous.hide();
+    previous = new VjNotification({
+      message: msg.mdoc.content,
+      duration: 3000,
+    });
+    previous.show();
+    return false;
+  }
+  if (document.hidden) return false;
   // Is message
-  return new VjNotification({
-    ...(msg.udoc._id === 1 && msg.mdoc.flag & 4)
-      ? { message: i18n('You received a system message, click here to view.') }
-      : {
+  new VjNotification({
+    ...(msg.udoc._id === 1)
+      ? {
+        type: 'info',
+        message: msg.mdoc.flag & FLAG_RICHTEXT ? i18n('You received a system message, click here to view.') : msg.mdoc.content,
+        ...(msg.mdoc.avatar ? { avatar: msg.mdoc.avatar } : {}),
+      } : {
         title: msg.udoc.uname,
         avatar: msg.udoc.avatarUrl,
         message: msg.mdoc.content,
       },
     duration: 15000,
-    action: () => window.open(`/home/messages?uid=${msg.udoc._id}`, '_blank'),
+    action: () => window.open(msg.mdoc.url ? msg.mdoc.url : `/home/messages?uid=${msg.udoc._id}`, '_blank'),
   }).show();
+  return true;
+};
+
+const initWorkerMode = (endpoint) => {
+  console.log('Messages: using SharedWorker');
+  const worker = new SharedWorker(new URL('./worker.ts', import.meta.url), { name: 'HydroMessagesWorker' });
+  worker.port.start();
+  window.addEventListener('beforeunload', () => {
+    worker.port.postMessage({ type: 'unload' });
+  });
+  worker.port.postMessage({ type: 'conn', path: endpoint, cookie: document.cookie });
+  worker.port.onmessage = async (message) => {
+    if (process.env.NODE_ENV !== 'production') console.log('onmessage: ', message);
+    const { payload, type } = message.data;
+    if (type === 'message') {
+      if (onmessage(payload)) worker.port.postMessage({ type: 'ack', id: payload.mdoc._id });
+    } else if (type === 'i18n') {
+      worker.port.postMessage({ type: 'ack', id: `${payload.mdoc._id}-i18n`, payload: processI18n(payload) });
+    } else if (type === 'open-page') {
+      console.log('opening page');
+      window.open('/home/messages');
+    }
+  };
 };
 
 const messagePage = new AutoloadPage('messagePage', (pagename) => {
@@ -44,11 +97,22 @@ const messagePage = new AutoloadPage('messagePage', (pagename) => {
       action: () => window.open('/home/messages', '_blank'),
     }).show();
   }
+  const url = new URL(`${UiContext.ws_prefix}websocket`, window.location.href);
+  const endpoint = url.toString().replace('http', 'ws');
+  if (window.SharedWorker) {
+    try {
+      initWorkerMode(endpoint);
+      return;
+    } catch (e) {
+      console.error('SharedWorker init fail: ', e.message);
+    }
+  }
   if (!window.BroadcastChannel) {
     console.error('BoardcastChannel not supported');
     return;
   }
 
+  console.log('Messages: using BroadcastChannel');
   let isMaster = false;
   const selfId = nanoid();
   const channel = new BroadcastChannel('hydro-messages');
@@ -62,7 +126,7 @@ const messagePage = new AutoloadPage('messagePage', (pagename) => {
     localStorage.setItem('pages', JSON.stringify(c.filter((i) => i !== selfId)));
     if (!isMaster) return;
     localStorage.removeItem('page.master');
-    channel?.postMessage({ type: 'master' });
+    channel.postMessage({ type: 'master' });
   };
 
   function asMaster() {
@@ -70,45 +134,25 @@ const messagePage = new AutoloadPage('messagePage', (pagename) => {
     isMaster = true;
     localStorage.setItem('page.master', selfId);
     const masterChannel = new BroadcastChannel('hydro-messages');
-    const url = new URL('/home/messages-conn', window.location.href.replace('http', 'ws'));
-    // TODO handle a better way for cookie
-    url.searchParams.append('sid', document.cookie);
-    const sock = new ReconnectingWebsocket(url.toString());
-    const pending = {};
-    sock.onopen = () => console.log('Connected');
-    sock.onerror = console.error;
-    sock.onclose = (...args) => console.log('Closed', ...args);
-    sock.onmessage = async (message) => {
-      if (process.env.NODE_ENV !== 'production') console.log('onmessage: ', message);
-      const payload = JSON.parse(message.data);
-      const id = nanoid();
-      masterChannel.postMessage({ type: 'message', id, payload });
-      const success = await new Promise<boolean>((resolve) => {
-        pending[id] = resolve;
-        setTimeout(() => {
-          delete pending[id];
-          resolve(false);
-        }, 1000);
-      });
-      if (!success && window.Notification?.permission === 'granted') {
-        const notification = new window.Notification(
-          payload.udoc.uname || 'Hydro Notification',
-          {
-            icon: payload.udoc.avatarUrl || '/android-chrome-192x192.png',
-            body: payload.mdoc.content,
-          },
-        );
-        notification.onclick = () => window.open('/home/messages');
-      }
+    const sock = new Sock(endpoint);
+    sock.onopen = () => {
+      sock.send(JSON.stringify({
+        operation: 'subscribe',
+        request_id: Math.random().toString(16).substring(2),
+        credential: document.cookie.split('sid=')[1].split(';')[0],
+        channels: ['message'],
+      }));
     };
-    masterChannel.onmessage = (msg) => {
-      if (msg.data.type === 'message-push') pending[msg.data.id]?.(true);
+    sock.onmessage = async (message) => {
+      const payload = JSON.parse(message.data);
+      if (payload.operation === 'event') {
+        masterChannel.postMessage({ type: 'message', payload: payload.payload });
+      }
     };
   }
 
   channel.onmessage = (msg) => {
     if (msg.data.type === 'message' && !document.hidden) {
-      channel.postMessage({ type: 'message-push', id: msg.data.id });
       onmessage(msg.data.payload);
     }
     if (msg.data.type === 'master') {

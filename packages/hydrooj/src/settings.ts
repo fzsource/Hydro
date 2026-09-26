@@ -1,136 +1,194 @@
-import { JSONSchema7Definition } from 'json-schema';
+import * as yaml from 'js-yaml';
+import Schema from 'schemastery';
+import { Context, Service } from './context';
+import { Logger } from './logger';
+import {
+    AccountSetting, DomainSetting, DomainUserSetting, PreferenceSetting, SystemSetting,
+} from './model/setting';
 
-type Def = Exclude<JSONSchema7Definition, boolean>;
+const logger = new Logger('settings');
 
-function port(examples: number[] = []) {
-    const res: Def = {
-        type: 'integer', minimum: 1, maximum: 65535,
-    };
-    if (examples.length) {
-        res.default = examples[0];
-        res.examples = examples;
+declare module 'cordis' {
+    interface Context {
+        setting: SettingService;
     }
-    return res;
 }
 
-export const Schema = {
-    string<T extends Def>(title: string, defaultValue: string, extra?: T) {
-        return {
-            type: 'string' as 'string',
-            default: defaultValue,
-            title,
-            ...extra,
-        };
-    },
-    boolean<T extends Def>(title: string, defaultValue: boolean, extra?: T) {
-        return {
-            type: 'boolean' as 'boolean',
-            default: defaultValue,
-            title,
-            ...extra,
-        };
-    },
-    integer<T extends Def>(title: string, defaultValue: number, extra?: T) {
-        return {
-            type: 'integer' as 'integer',
-            default: defaultValue,
-            title,
-            ...extra,
-        };
-    },
-};
+const T = <F extends (...args: any[]) => any>(origFunc: F, disposeFunc?) =>
+    function method(this: Service, ...args: Parameters<F>) {
+        this.ctx.effect(() => {
+            const res = origFunc(...args);
+            return () => (disposeFunc ? disposeFunc(res) : res());
+        });
+    };
 
-const definitions: Record<string, Def> = {
-    smtp: {
-        type: 'object',
-        properties: {
-            user: Schema.string('SMTP Username', 'noreply@hydro.ac'),
-            from: Schema.string('Mail From', 'Hydro <noreply@hydro.ac>'),
-            pass: Schema.string('SMTP Password', '', { writeOnly: true }),
-            host: Schema.string('SMTP Server Host', 'smtp.hydro.ac', { pattern: '^[a-zA-Z0-9\\-\\.]+$' }),
-            port: Schema.integer('SMTP Server Port', 25, { examples: [25, 465], minimum: 1, maximum: 65535 }),
-            secure: Schema.boolean('Use SSL', false),
-            verify: Schema.boolean('Verify register email', false),
-        },
-        additionalProperties: false,
-    },
-    file: {
-        type: 'object',
-        properties: {
-            endPoint: Schema.string('Storage engine endPoint', 'http://localhost:9000', {
-                pattern: '^https?://[a-zA-Z0-9\\-\\.]+/?$',
-            }),
-            accessKey: Schema.string('Storage engine accessKey', ''),
-            secretKey: Schema.string('Storage engine secretKey', '', { writeOnly: true }),
-            bucket: Schema.string('Storage engine bucket', 'hydro'),
-            region: Schema.string('Storage engine region', 'us-east-1'),
-            pathStyle: Schema.boolean('pathStyle endpoint', true),
-            endPointForUser: Schema.string('EndPoint for user', '/fs/'),
-            endPointForJudge: Schema.string('EndPoint for judge', '/fs/'),
-        },
-        required: ['endPoint', 'accessKey', 'secretKey'],
-        additionalProperties: false,
-    },
-    server: {
-        type: 'object',
-        properties: {
-            name: Schema.string('Server Name', 'Hydro'),
-            url: Schema.string('Self URL', 'https://hydro.ac/', { pattern: '/$' }),
-            cdn: Schema.string('CDN prefix', '/', {
-                pattern: '/$', examples: ['/', 'https://cdn.hydro.ac/'],
-            }),
-            port: port([8888, 80, 443]),
-            xff: Schema.string('IP Header', '', { examples: ['x-forwarded-for', 'x-real-ip'], pattern: '^[a-z-]+$' }),
-            xhost: Schema.string('Host Header', '', { examples: ['x-real-host'], pattern: '^[a-z-]+$' }),
-            language: { type: 'string', enum: Object.keys(global.Hydro.locales) },
-            upload: Schema.string('Upload size limit', '256m', { pattern: '^[0-9]+[mkg]b?$' }),
-            login: Schema.boolean('Enable builtin login', true),
-            message: Schema.boolean('Enable message', true),
-            blog: Schema.boolean('Enable blog', true),
-            checkUpdate: Schema.boolean('Daily update check', true),
-        },
-        required: ['url', 'port', 'language'],
-    },
-    limit: {
-        type: 'object',
-        properties: {
-            problem_files_max: { type: 'integer', minimum: 0 },
-        },
-    },
-    session: {
-        type: 'object',
-        properties: {
-            keys: {
-                type: 'array', items: { type: 'string' }, default: [String.random(32)], writeOnly: true,
-            },
-            secure: { type: 'boolean', default: false },
-            saved_expire_seconds: { type: 'integer', minimum: 300, default: 3600 * 24 * 30 },
-            unsaved_expire_seconds: { type: 'integer', minimum: 60, default: 3600 * 3 },
-        },
-    },
-    user: {
-        type: 'object',
-        properties: {
-            quota: { type: 'integer', minimum: 0 },
-        },
-    },
-};
+export class SettingService extends Service {
+    static inject = ['db'];
+    static name = 'setting';
+    static blacklist = ['__proto__', 'prototype', 'constructor'];
 
-export const schema: Def = {
-    type: 'object',
-    definitions,
-    properties: {
-        smtp: definitions.smtp,
-        file: definitions.file,
-        server: definitions.server,
-        limit: definitions.limit,
-        session: definitions.session,
-        user: definitions.user,
-    },
-    additionalProperties: true,
-};
+    settings: Schema[] = [];
+    private systemConfig: any = {};
+    configSource: string = '';
+    private applied: any = {};
+    private initialValues = {};
+    private _lastMigrate = Promise.resolve();
 
-export function addDef(key: string, def: Def) {
-    definitions[key] = def;
-    schema.properties[key] = definitions[key];
+    PreferenceSetting = T(PreferenceSetting);
+    AccountSetting = T(AccountSetting);
+    DomainSetting = T(DomainSetting);
+    DomainUserSetting = T(DomainUserSetting);
+    SystemSetting = T(SystemSetting);
+
+    constructor(ctx: Context) {
+        super(ctx, 'setting');
+    }
+
+    async [Service.init]() {
+        const payload = await this.ctx.db.collection('system').find({}).toArray();
+        this.initialValues = Object.fromEntries(payload.map((v) => [v._id, v.value]));
+        return await this.loadConfig();
+    }
+
+    _applySchema() {
+        this.applied = this.settings.length ? Schema.intersect(this.settings)(this.systemConfig) : this.systemConfig;
+    }
+
+    async loadConfig() {
+        const config = await this.ctx.db.collection('system').findOne({ _id: 'config' }, {
+            readPreference: 'primary', readConcern: 'majority',
+        });
+        try {
+            this.configSource = config?.value || '{}';
+            this.systemConfig = yaml.load(this.configSource);
+            this._applySchema();
+            this.ctx.emit('system/setting', { config: this.configSource });
+            logger.info('Successfully loaded config');
+        } catch (e) {
+            logger.error('Failed to load config', e.message);
+        }
+    }
+
+    applyDelta(source: any, key: string, value: any) {
+        const path = key.split('.');
+        if (path.some((i) => SettingService.blacklist.includes(i))) return false;
+        const t = path.pop();
+        const root = JSON.parse(JSON.stringify(source));
+        let cursor = root;
+        for (const p of path) {
+            cursor[p] ??= {};
+            cursor = cursor[p];
+        }
+        cursor[t] = value;
+        return root;
+    }
+
+    isPatchValid(key: string, value: any) {
+        const root = this.applyDelta(this.systemConfig, key, value);
+        try {
+            Schema.intersect(this.settings)(root);
+        } catch (e) {
+            return false;
+        }
+        return true;
+    }
+
+    async saveConfig(config: any) {
+        Schema.intersect(this.settings)(config);
+        const value = yaml.dump(config);
+        await this.ctx.db.collection('system').updateOne({ _id: 'config' }, { $set: { value } }, { upsert: true });
+        await this.loadConfig();
+    }
+
+    async _actualMigrate(schema: Schema<any>) {
+        const processNode = async (path: string[], node: Schema<any, any>) => {
+            for (const item of node.list || []) await processNode(path, item); // eslint-disable-line no-await-in-loop
+            for (const key in node.dict || {}) await processNode([...path, ...key], node.dict[key]); // eslint-disable-line no-await-in-loop
+            if (['string', 'number', 'boolean'].includes(node.type)) {
+                const value = this.initialValues[path.join('.')];
+                const migrated = this.initialValues[`${path.join('.')}__migrated`];
+                if (migrated || !Object.hasOwn(this.initialValues, path.join('.'))) return;
+                let parsed;
+                try {
+                    if (node.type === 'string') parsed = value;
+                    if (node.type === 'number') parsed = +value;
+                    if (node.type === 'boolean') parsed = !!value && !['off', '0', 'false'].includes(value);
+                } catch (e) { }
+                if (parsed === undefined) return;
+                await this.ctx.db.collection('system').updateOne({ _id: `${path.join('.')}__migrated` }, { $set: { value: true } }, { upsert: true });
+                this.ctx.logger.info('Migrating %s: %o', path.join('.'), parsed);
+                await this.saveConfig(this.applyDelta(this.systemConfig, path.join('.'), parsed));
+            }
+        };
+        await processNode([], schema);
+    }
+
+    async _tryMigrateConfig(schema: Schema<any>) {
+        this._lastMigrate = this._lastMigrate.then(() => this._actualMigrate(schema));
+        await this._lastMigrate;
+    }
+
+    _get(key: string) {
+        const parts = key.split('.');
+        if (parts.some((p) => SettingService.blacklist.includes(p.toString()))) throw new Error('Invalid path');
+        let currentValue = this.applied;
+        for (const p of parts) {
+            if (!currentValue) return undefined;
+            currentValue = currentValue[p];
+        }
+        return currentValue;
+    }
+
+    get(key: string) {
+        return (this.ctx ? this.ctx.domain?.config?.[key.replace(/\./g, '$')] : null)
+            ?? (this._get(key) ?? global.Hydro?.model?.system?.get?.(key));
+    }
+
+    async setConfig(key: string, value: any) {
+        const newConfig = this.applyDelta(this.systemConfig, key, value);
+        await this.saveConfig(newConfig);
+    }
+
+    requestConfig<T, S>(s: Schema<T, S>, dynamic = true): S {
+        if (!this.settings.includes(s)) {
+            this.ctx.effect(() => {
+                logger.debug('Loading config', s);
+                this.settings.push(s);
+                this._applySchema();
+                return () => {
+                    logger.debug('Unloading config', s);
+                    this.settings = this.settings.filter((v) => v !== s);
+                    this._applySchema();
+                };
+            });
+        }
+        let curValue = s(this.systemConfig);
+        if (!dynamic) return curValue;
+        this.ctx.on('system/setting', () => {
+            try {
+                curValue = s(this.systemConfig);
+            } catch (e) {
+                logger.warn('Cannot read config: ', e.message);
+                curValue = null;
+            }
+        });
+        const that = this;
+        const getAccess = (path: (string | symbol)[]) => {
+            if (path.some((p) => SettingService.blacklist.includes(p.toString()))) throw new Error(`Invalid path: ${path.join('.')}`);
+            let currentValue = curValue;
+            for (const p of path) currentValue = currentValue[p];
+            if ((typeof currentValue !== 'object') || !currentValue || Array.isArray(currentValue)) return currentValue;
+            if (path.some((p) => typeof p === 'symbol')) return currentValue;
+            return new Proxy(currentValue, {
+                get(self, key: string) {
+                    return getAccess([...path, key]);
+                },
+                set(self, p: string | symbol, newValue: any) {
+                    that.setConfig([...path, p].join(','), newValue);
+                    return true;
+                },
+            });
+        };
+        return getAccess([]);
+    }
 }

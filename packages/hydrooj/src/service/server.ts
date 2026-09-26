@@ -1,433 +1,282 @@
-import http from 'http';
+import { resolve } from 'path';
 import cac from 'cac';
-import Koa, { Context } from 'koa';
-import Body from 'koa-body';
-import Compress from 'koa-compress';
-import proxy from 'koa-proxies';
+import fs from 'fs-extra';
 import cache from 'koa-static-cache';
-import { filter } from 'lodash';
-import tx2 from 'tx2';
-import WebSocket from 'ws';
-import { parseMemoryMB } from '@hydrooj/utils/lib/utils';
+import { type FindCursor, ObjectId } from 'mongodb';
 import {
-    HydroError, InvalidOperationError, MethodNotAllowedError,
-    NotFoundError, PermissionError, PrivilegeError,
-    UserFacingError,
-} from '../error';
-import { DomainDoc, User } from '../interface';
+    applyApiHandler, ConnectionHandler as ConnectionHandlerOriginal,
+    Handler as HandlerOriginal, HydroError, NotFoundError, UserFacingError,
+    WebService,
+} from '@hydrooj/framework';
+import { errorMessage, Time } from '@hydrooj/utils';
+import { Context } from '../context';
+import { PermissionError, PrivilegeError } from '../error';
+import type { DomainDoc } from '../interface';
 import { Logger } from '../logger';
 import { PERM, PRIV } from '../model/builtin';
 import * as opcount from '../model/opcount';
-import * as system from '../model/system';
-import { errorMessage } from '../utils';
-import * as bus from './bus';
-import * as decorators from './decorators';
+import * as OplogModel from '../model/oplog';
+import system from '../model/system';
+import db from './db';
 import baseLayer from './layers/base';
 import domainLayer from './layers/domain';
-import rendererLayer from './layers/renderer';
-import responseLayer from './layers/response';
 import userLayer from './layers/user';
-import { Router } from './router';
-
-export * from './decorators';
-
-export interface HydroRequest {
-    method: string;
-    host: string;
-    hostname: string;
-    ip: string;
-    headers: any;
-    cookies: any;
-    body: any;
-    files: Record<string, import('formidable').File>;
-    query: any;
-    path: string;
-    params: any;
-    referer: string;
-    json: boolean;
-    websocket: boolean;
-}
-export interface HydroResponse {
-    body: any,
-    type: string,
-    status: number,
-    template?: string,
-    redirect?: string,
-    disposition?: string,
-    etag?: string,
-    attachment: (name: string, stream?: any) => void,
-    addHeader: (name: string, value: string) => void,
-}
-interface HydroContext {
-    request: HydroRequest;
-    response: HydroResponse;
-    user: User;
-    domain?: DomainDoc;
-    args: Record<string, any>;
-    UiContext: Record<string, any>;
-}
-export interface KoaContext extends Koa.DefaultContext {
-    HydroContext: HydroContext;
-    handler: any;
-    session: Record<string, any>;
-    render: (name: string, args: any) => Promise<void>;
-    renderHTML: (name: string, args: any) => Promise<string>;
-    getUrl: (name: string, args: any) => string;
-    translate: (key: string) => string;
-}
 
 const argv = cac().parse();
-const logger = new Logger('server');
-const reqCount = tx2.meter({
-    name: 'req/sec',
-    samples: 1,
-    timeframe: 60,
-});
-export const app = new Koa<Koa.DefaultState, KoaContext>({
-    keys: system.get('server.keys'),
-});
-export const router = new Router();
-export const httpServer = http.createServer(app.callback());
-export const wsServer = new WebSocket.Server({ server: httpServer });
-app.on('error', (error) => {
-    if (error.code !== 'EPIPE' && error.code !== 'ECONNRESET' && !error.message.includes('Parse Error')) {
-        logger.error('Koa app-level error', { error });
-    }
-});
-wsServer.on('error', (error) => {
-    console.log('Websocket server error:', error);
-});
-
 const ignoredLimit = `,${argv.options.ignoredLimit},`;
-function serializer(k: string, v: any) {
-    if (k.startsWith('_') && k !== '_id') return undefined;
-    if (typeof v === 'bigint') return `BigInt::${v.toString()}`;
-    return v;
-}
 
-export async function prepare() {
-    app.keys = system.get('session.keys') as unknown as string[];
-    app.use(proxy('/fs', {
-        target: system.get('file.endPoint'),
-        changeOrigin: true,
-        rewrite: (p) => p.replace('/fs', ''),
-    }));
-    app.use(Compress());
-    for (const dir of global.publicDirs) {
-        app.use(cache(dir, {
-            maxAge: argv.options.public ? 0 : 24 * 3600 * 1000,
-        }));
-    }
-    if (process.env.DEV) {
-        app.use(async (ctx: Context, next: Function) => {
-            const startTime = new Date().getTime();
-            await next();
-            const endTime = new Date().getTime();
-            if (ctx.nolog || ctx.response.headers.nolog) return;
-            ctx._remoteAddress = ctx.request.ip;
-            logger.debug(`${ctx.request.method} /${ctx.domainId || 'system'}${ctx.request.path} \
-${ctx.response.status} ${endTime - startTime}ms ${ctx.response.length}`);
-        });
-    }
-    app.use(Body({
-        multipart: true,
-        jsonLimit: '8mb',
-        formLimit: '8mb',
-        formidable: {
-            maxFileSize: parseMemoryMB(system.get('server.upload') || '256m') * 1024 * 1024,
-        },
-    }));
-    const layers = [baseLayer, rendererLayer(router, logger), responseLayer(router), userLayer];
-    app.use(async (ctx, next) => await next().catch(console.error)).use(domainLayer);
-    layers.forEach((layer) => router.use(layer as any));
-    wsServer.on('connection', async (socket, request) => {
-        const ctx: any = app.createContext(request, {} as any);
-        await domainLayer(ctx, () => baseLayer(ctx, () => layers[1](ctx, () => userLayer(ctx, () => { }))));
-        for (const manager of router.wsStack) {
-            if (manager.accept(socket, request, ctx)) return;
-        }
-        socket.close();
-    });
-}
+const logger = new Logger('server');
 
-export class HandlerCommon {
-    render: (name: string, args?: any) => Promise<void>;
-    renderHTML: (name: string, args?: any) => Promise<string>;
-    url: (name: string, args?: any) => string;
-    translate: (key: string) => string;
-    session: Record<string, any>;
-    /** @deprecated */
-    domainId: string;
+declare module '@hydrooj/framework' {
+    export interface HandlerCommon {
+        domain: DomainDoc;
 
-    constructor(
-        public ctx: KoaContext, public args: Record<string, any>,
-        public request: HydroRequest, public response: HydroResponse,
-        public user: User, public domain: DomainDoc, public UiContext: Record<string, any>,
-    ) {
-        this.render = ctx.render.bind(ctx);
-        this.renderHTML = ctx.renderHTML.bind(ctx);
-        this.url = ctx.getUrl.bind(ctx);
-        this.translate = ctx.translate.bind(ctx);
-        this.session = ctx.session;
-        this.domainId = args.domainId;
-    }
-
-    async limitRate(op: string, periodSecs: number, maxOperations: number, withUserId = false) {
-        if (ignoredLimit.includes(op)) return;
-        if (this.user && this.user.hasPriv(PRIV.PRIV_UNLIMITED_ACCESS)) return;
-        const overrideLimit = system.get(`limit.${op}`);
-        if (overrideLimit) maxOperations = overrideLimit;
-        let id = this.request.ip;
-        if (withUserId) id += `@${this.user._id}`;
-        await opcount.inc(op, id, periodSecs, maxOperations);
-    }
-
-    renderTitle(str: string) {
-        const name = this.domain?.ui?.name || system.get('server.name');
-        if (this.UiContext.extraTitleContent) return `${this.ctx.translate(str)} - ${this.UiContext.extraTitleContent} - ${name}`;
-        return `${this.ctx.translate(str)} - ${name}`;
-    }
-
-    checkPerm(...args: bigint[]) {
-        if (!this.user.hasPerm(...args)) {
-            if (this.user.hasPriv(PRIV.PRIV_USER_PROFILE)) throw new PermissionError(...args);
-            throw new PrivilegeError(PRIV.PRIV_USER_PROFILE);
-        }
-    }
-
-    checkPriv(...args: number[]) {
-        if (!this.user.hasPriv(...args)) throw new PrivilegeError(...args);
+        paginate<T>(cursor: FindCursor<T>, page: number, key: string): Promise<[docs: T[], numPages: number, count: number]>;
+        paginate<T>(cursor: FindCursor<T>, page: number, limit: number): Promise<[docs: T[], numPages: number, count: number]>;
+        progress(message: string, params: any[]): void;
+        limitRate(op: string, periodSecs: number, maxOperations: number, defaultKey?: string): Promise<void>;
+        renderTitle(str: string): string;
     }
 }
 
-export class Handler extends HandlerCommon {
-    loginMethods: any;
-    noCheckPermView = false;
-    __param: Record<string, decorators.ParamOption[]>;
+export { Mutation, Query } from '@hydrooj/framework/api';
+export * from '@hydrooj/framework/decorators';
+export * from '@hydrooj/framework/validator';
 
-    back(body?: any) {
-        this.response.body = body || this.response.body || {};
-        this.response.redirect = this.request.headers.referer || '/';
-    }
-
-    binary(data: any, name?: string) {
-        this.response.body = data;
-        this.response.template = null;
-        this.response.type = 'application/octet-stream';
-        if (name) this.response.disposition = `attachment; filename="${encodeURIComponent(name)}"`;
-    }
-
-    async init() {
-        if (!argv.options.benchmark) await this.limitRate('global', 5, 88);
-        if (!this.noCheckPermView && !this.user.hasPriv(PRIV.PRIV_VIEW_ALL_DOMAIN)) this.checkPerm(PERM.PERM_VIEW);
-        this.loginMethods = filter(Object.keys(global.Hydro.lib), (str) => str.startsWith('oauth_'))
-            .map((key) => ({
-                id: key.split('_')[1],
-                icon: global.Hydro.lib[key].icon,
-                text: global.Hydro.lib[key].text,
-            }));
-    }
-
-    async onerror(error: HydroError) {
-        if (!error.msg) error.msg = () => error.message;
-        if (error instanceof UserFacingError && !process.env.DEV) error.stack = '';
-        if (!(error instanceof NotFoundError)) {
-            logger.error(`User: ${this.user._id}(${this.user.uname}) ${this.request.method}: ${this.request.path}`, error.msg(), error.params);
-            if (error.stack) logger.error(error.stack);
+/*
+ * For security concern, some API requires sudo privilege to access.
+ * And for some superadmin operations,
+ * we do not allow them using a password to perform the sudo operation,
+ * as most user choose to use "remember password" option.
+ * When teachers are using a superuser account, accessing from classrooms,
+ * it may lead to serious security issues.
+ * !!! Please make sure that all superuser accounts have two factor authentication enabled. !!!
+ */
+export function requireSudo(target: any, funcName: string, obj: any) {
+    const originalMethod = obj.value;
+    obj.value = function sudo(this: Handler, ...args: any[]) {
+        if (this.session.sudo && Date.now() - this.session.sudo < Time.hour) {
+            if (this.session.sudoArgs?.referer) this.request.headers.referer = this.session.sudoArgs.referer;
+            this.session.sudoArgs = null;
+            return originalMethod.call(this, ...args);
         }
-        if (this.user?._id === 0 && (error instanceof PermissionError || error instanceof PrivilegeError)) {
-            this.response.redirect = this.ctx.getUrl('user_login', { query: { redirect: this.request.path + this.ctx.search } });
-        } else {
-            this.response.status = error instanceof UserFacingError ? error.code : 500;
-            this.response.template = error instanceof UserFacingError ? 'error.html' : 'bsod.html';
-            this.response.body = {
-                error: { message: error.msg(), params: error.params, stack: errorMessage(error.stack || '') },
-            };
-        }
-    }
-}
-
-async function bail(name: string, ...args: any[]) {
-    const r = await bus.bail(name, ...args);
-    if (r instanceof Error) throw r;
-}
-
-async function handle(ctx: KoaContext, HandlerClass, checker) {
-    reqCount.mark();
-    const {
-        args, request, response, user, domain, UiContext,
-    } = ctx.HydroContext;
-    Object.assign(args, ctx.params);
-    const h = new HandlerClass(ctx, args, request, response, user, domain, UiContext);
-    ctx.handler = h;
-    try {
-        const method = ctx.method.toLowerCase();
-        const operation = (method === 'post' && ctx.request.body.operation)
-            ? `_${ctx.request.body.operation}`.replace(/_([a-z])/gm, (s) => s[1].toUpperCase())
-            : '';
-
-        await bus.serial('handler/create', h);
-
-        if (checker) checker.call(h);
-        if (method === 'post') {
-            if (operation) {
-                if (typeof h[`post${operation}`] !== 'function') {
-                    throw new InvalidOperationError(operation);
-                }
-            } else if (typeof h.post !== 'function') {
-                throw new MethodNotAllowedError(method);
-            }
-        } else if (typeof h[method] !== 'function' && typeof h.all !== 'function') {
-            throw new MethodNotAllowedError(method);
-        }
-
-        await bail('handler/init', h);
-        await bail(`handler/before-prepare/${HandlerClass.name.replace(/Handler$/, '')}`, h);
-        await bail('handler/before-prepare', h);
-        h.args.__prepare = Date.now();
-        if (h._prepare) await h._prepare(args);
-        if (h.prepare) await h.prepare(args);
-        h.args.__prepareDone = Date.now();
-        await bail(`handler/before/${HandlerClass.name.replace(/Handler$/, '')}`, h);
-        await bail('handler/before', h);
-        h.args.__method = Date.now();
-        if (h.all) await h.all(args);
-        if (h[method]) await h[method](args);
-        h.args.__methodDone = Date.now();
-        await bail(`handler/before-operation/${HandlerClass.name.replace(/Handler$/, '')}`, h);
-        await bail('handler/before-operation', h);
-        if (operation) await h[`post${operation}`](args);
-        await bail(`handler/after/${HandlerClass.name.replace(/Handler$/, '')}`, h);
-        await bail('handler/after', h);
-        if (h.cleanup) await h.cleanup(args);
-        await bail(`handler/finish/${HandlerClass.name.replace(/Handler$/, '')}`, h);
-        await bail('handler/finish', h);
-    } catch (e) {
-        try {
-            await bail(`handler/error/${HandlerClass.name.replace(/Handler$/, '')}`, h, e);
-            await bail('handler/error', h, e);
-            await h.onerror(e);
-        } catch (err) {
-            h.response.code = 500;
-            h.response.body = `${err.message}\n${err.stack}`;
-        }
-    }
-}
-
-const Checker = (permPrivChecker) => {
-    let perm: bigint;
-    let priv: number;
-    let checker = () => { };
-    for (const item of permPrivChecker) {
-        if (typeof item === 'object') {
-            if (typeof item.call !== 'undefined') {
-                checker = item;
-            } else if (typeof item[0] === 'number') {
-                priv = item;
-            } else if (typeof item[0] === 'bigint') {
-                perm = item;
-            }
-        } else if (typeof item === 'number') {
-            priv = item;
-        } else if (typeof item === 'bigint') {
-            perm = item;
-        }
-    }
-    return function check(this: Handler) {
-        checker();
-        if (perm) this.checkPerm(perm);
-        if (priv) this.checkPriv(priv);
+        this.session.sudoArgs = {
+            method: this.request.method,
+            referer: this.request.headers.referer,
+            args: this.args,
+            redirect: this.request.originalPath,
+        };
+        this.response.redirect = this.url('user_sudo');
+        return 'cleanup';
     };
-};
-
-export function Route(name: string, path: string, RouteHandler: any, ...permPrivChecker) {
-    router.all(name, path, (ctx) => handle(ctx as any, RouteHandler, Checker(permPrivChecker)));
+    return obj;
 }
 
-export class ConnectionHandler extends HandlerCommon {
-    conn: WebSocket;
+export class Handler extends HandlerOriginal {
+    domain: DomainDoc;
+}
+export class ConnectionHandler extends ConnectionHandlerOriginal {
+    domain: DomainDoc;
+}
 
-    send(data: any) {
-        this.conn.send(JSON.stringify(data, serializer));
-    }
+export async function apply(ctx: Context) {
+    ctx.plugin(WebService, {
+        keys: system.get('session.keys'),
+        proxy: !!system.get('server.xproxy') || !!system.get('server.xff'),
+        cors: system.get('server.cors') || '',
+        upload: system.get('server.upload') || '256m',
+        port: argv.options.port || system.get('server.port'),
+        host: argv.options.host || system.get('server.host'),
+        xff: system.get('server.xff'),
+        xhost: system.get('server.xhost'),
+    });
+    if (process.env.HYDRO_CLI) return;
+    await ctx.inject(['server', 'oauth', 'setting'], (childContext) => {
+        const { server, on, oauth } = childContext;
+        server.addHandlerLayer('init', async (c, next) => {
+            const init = Date.now();
+            try {
+                await next();
+            } finally {
+                const finish = Date.now();
+                if (finish - init > 5000) {
+                    const method = c.request.method;
+                    const id = await OplogModel.log(c.handler, 'slow_request', { method, processtime: finish - init });
+                    logger.warn(`Slow handler: ID=${id}, `, method, c.path, `${finish - init}ms`);
+                }
+                // TODO metrics: calc avg response time
+            }
+        });
 
-    close(code: number, reason: string) {
-        this.conn.close(code, reason);
-    }
+        applyApiHandler(childContext, 'api', '/api/:op');
+        server.setDefaultContext(childContext);
 
-    onerror(err: HydroError) {
-        if (err instanceof UserFacingError) err.stack = this.ctx.HydroContext.request.path;
-        if (!(err instanceof NotFoundError)
-            && !((err instanceof PrivilegeError || err instanceof PermissionError) && this.user?._id === 0)) {
-            logger.error(`Path:${this.ctx.HydroContext.request.path}, User:${this.user?._id}(${this.user?.uname})`);
-            logger.error(err);
+        for (const addon of [...Object.values(global.addons)].reverse()) {
+            const dir = resolve(addon, 'public');
+            if (!fs.existsSync(dir)) continue;
+            server.addServerLayer(`${addon}_public`, cache(dir, {
+                maxAge: argv.options.public ? 0 : 24 * 3600 * 1000,
+            }));
         }
-        this.send({
-            error: {
-                name: err.name,
-                params: err.params || [],
+
+        server.addServerLayer('domain', domainLayer);
+        server.addWSLayer('domain', domainLayer);
+        server.addLayer('base', baseLayer);
+        server.addLayer('user', userLayer);
+
+        const cachedTranslate = ctx.i18n.translate;
+
+        server.handlerMixin({
+            url(name: string, ...kwargsList: Record<string, any>[]) {
+                if (name === '#') return '#';
+                let res = '#';
+                const args: any = Object.create(null);
+                const query: any = Object.create(null);
+                for (const kwargs of kwargsList) {
+                    for (const key in kwargs) {
+                        if (kwargs[key] instanceof ObjectId) args[key] = kwargs[key].toHexString();
+                        else if (key !== 'query') args[key] = kwargs[key].toString().replace(/\//g, '%2F');
+                    }
+                    for (const key in kwargs.query || {}) {
+                        if (query[key] instanceof ObjectId) query[key] = kwargs.query[key].toHexString();
+                        else query[key] = kwargs.query[key].toString();
+                    }
+                }
+                try {
+                    const { anchor } = args;
+                    const host = this.domain?.host || [];
+                    const target = args.domainId || this.args.domainId;
+                    const rootDomainId = (this.request.host && host?.length && host?.includes(this.request.host))
+                        ? this.args.domainId : 'system';
+                    delete args.query;
+                    res = server.router.url(name, args, { query }).toString();
+                    if (anchor) res = `${res}#${anchor}`;
+                    if (target !== rootDomainId) res = `/d/${target}${res}`;
+                } catch (e) {
+                    logger.warn(e.message);
+                    logger.info('%s %o', name, args);
+                    if (!e.message.includes('Expected') || !e.message.includes('to match')) logger.info('%s', e.stack);
+                }
+                return res;
+            },
+            translate(str: string) {
+                if (!str) return '';
+                const lang = this.user?.viewLang || this.session?.viewLang;
+                const langs = lang
+                    ? [lang, ...this.context.acceptsLanguages()]
+                    : [...this.context.acceptsLanguages(), system.get('server.language')];
+                return cachedTranslate(str.toString(), langs);
+            },
+            paginate<T>(cursor: FindCursor<T>, page: number, key: string | number) {
+                return db.paginate(cursor, page, typeof key === 'number' ? key : (this.ctx.setting.get(`pagination.${key}`) || 20));
+            },
+            checkPerm(...args: bigint[]) {
+                if (!this.user.hasPerm(...args)) {
+                    if (this.user.hasPriv(PRIV.PRIV_USER_PROFILE)) throw new PermissionError(...args);
+                    throw new PrivilegeError(PRIV.PRIV_USER_PROFILE);
+                }
+            },
+            checkPriv(...args: number[]) {
+                if (!this.user.hasPriv(...args)) throw new PrivilegeError(...args);
+            },
+            progress(message: string, params: any[] = []) {
+                Hydro.model.message.sendInfo(this.user._id, JSON.stringify({ message, params }));
+            },
+            async limitRate(
+                op: string, periodSecs: number, maxOperations: number, defaultKey = system.get('limit.by_user') ? '{{ip}}@{{user}}' : '{{ip}}',
+            ) {
+                if (ignoredLimit.includes(op)) return;
+                if (this.user && this.user.hasPriv(PRIV.PRIV_UNLIMITED_ACCESS)) return;
+                const overrideLimit = system.get(`limit.${op}`);
+                if (overrideLimit) maxOperations = overrideLimit;
+                // deprecated: remove boolean support in future
+                if (typeof defaultKey === 'boolean') defaultKey = defaultKey ? '{{user}}' : '{{ip}}';
+                const id = defaultKey.replace('{{ip}}', this.request.ip).replace('{{user}}', this.user?._id?.toString() || '0');
+                await opcount.inc(op, id, periodSecs, maxOperations);
+            },
+            renderTitle(str: string) {
+                const name = this.ctx.get('setting')?.get('server.name') || system.get('server.name');
+                if (this.UiContext.extraTitleContent) return `${this.UiContext.extraTitleContent} - ${this.translate(str)} - ${name}`;
+                return `${this.translate(str)} - ${name}`;
             },
         });
-        this.close(4000, err.toString());
-    }
-}
+        server.httpHandlerMixin({
+            async onerror(error: HydroError) {
+                error.msg ||= () => error.message;
+                if (error instanceof UserFacingError && !process.env.DEV) error.stack = '';
+                if (!(error instanceof NotFoundError) && !('nolog' in error)) {
+                    // eslint-disable-next-line max-len
+                    logger.error(`User: ${this.user._id}(${this.user.uname}) ${this.request.method}: /d/${this.domain._id}${this.request.path}`, error.msg(), error.params);
+                    if (error.stack) logger.error(error.stack);
+                }
+                if (this.user?._id === 0 && (error instanceof PermissionError || error instanceof PrivilegeError)) {
+                    this.response.redirect = this.url('user_login', {
+                        query: {
+                            redirect: (this.context.originalPath || this.request.path) + this.context.search,
+                        },
+                    });
+                } else if (!this.user._dudoc.join && error instanceof PermissionError) {
+                    this.response.redirect = this.url('domain_join', {
+                        domainId: 'system',
+                        query: {
+                            redirect: (this.context.originalPath || this.request.path) + this.context.search,
+                            target: this.domain._id,
+                        },
+                    });
+                } else {
+                    this.response.status = error instanceof UserFacingError ? error.code : 500;
+                    this.response.template = error instanceof UserFacingError ? 'error.html' : 'bsod.html';
+                    this.response.body = {
+                        UserFacingError,
+                        error: {
+                            message: error.msg(), stack: errorMessage(error.stack || ''),
+                            params: error.params, name: error.name, code: error.code,
+                        },
+                        _rawError: error,
+                    };
+                }
+            },
+        });
+        server.wsHandlerMixin({
+            async onerror(err: HydroError) {
+                if (![NotFoundError, PrivilegeError, PermissionError].some((i) => err instanceof i) || this.user?._id !== 0) {
+                    const msg = 'msg' in err ? err.msg() : (err as any)?.message || '';
+                    logger.error(`Path:${this.request.path}, User:${this.user?._id}(${this.user?.uname})`, msg, err.params);
+                    logger.error(err);
+                }
+                if (err instanceof UserFacingError) err.stack = this.request.path;
+                this.send({
+                    error: {
+                        name: err.name,
+                        params: err.params || [],
+                    },
+                });
+                this.close(4000, err.toString());
+            },
+        });
 
-export function Connection(
-    name: string, prefix: string,
-    RouteConnHandler: any,
-    ...permPrivChecker: Array<number | bigint | Function>
-) {
-    const checker = Checker(permPrivChecker);
-    router.ws(prefix, async (conn, _, ctx) => {
-        const {
-            args, request, response, user, domain, UiContext,
-        } = ctx.HydroContext;
-        const h = new RouteConnHandler(ctx, args, request, response, user, domain, UiContext);
-        ctx.handler = h;
-        h.conn = conn;
-        try {
-            checker.call(h);
-            if (h._prepare) await h._prepare(args);
-            if (h.prepare) await h.prepare(args);
-            if (h.message) {
-                conn.onmessage = (e) => {
-                    h.message(JSON.parse(e.data.toString()));
-                };
-            }
-            conn.onclose = () => h.cleanup?.(args);
-        } catch (e) {
-            await h.onerror(e);
-        }
-    });
-}
-
-let started = false;
-
-// TODO use postInit?
-export async function start() {
-    if (started) return;
-    const port = system.get('server.port');
-    app.use(router.routes()).use(router.allowedMethods());
-    await new Promise((resolve) => {
-        httpServer.listen(argv.options.port || port, () => {
-            logger.success('Server listening at: %d', argv.options.port || port);
-            started = true;
-            resolve(true);
+        on('handler/create', async (h) => {
+            h.user = h.context.HydroContext.user as any;
+            h.domain = h.context.HydroContext.domain as any;
+            h.translate = h.translate.bind(h);
+            h.url = h.url.bind(h);
+            h.ctx = h.ctx.extend({ domain: h.domain });
+        });
+        on('handler/create/http', async (h) => {
+            if (!argv.options.benchmark && !h.notUsage) await h.limitRate('global', 5, 100);
+            h.loginMethods = Object.entries(oauth.providers)
+                .filter(([_, v]) => !v.hidden)
+                .map(([k, v]) => ({
+                    id: k,
+                    icon: v.icon,
+                    text: v.text,
+                    name: v.name,
+                }));
+            if ((!('noCheckPermView' in h) || !h.noCheckPermView) && !h.user.hasPriv(PRIV.PRIV_VIEW_ALL_DOMAIN)) h.checkPerm(PERM.PERM_VIEW);
+            if (h.context.pendingError) throw h.context.pendingError;
+        });
+        on('handler/create/ws', async (h) => {
+            if (h.context.pendingError) throw h.context.pendingError;
         });
     });
 }
-
-global.Hydro.service.server = {
-    ...decorators,
-    app,
-    httpServer,
-    wsServer,
-    router,
-    HandlerCommon,
-    Handler,
-    ConnectionHandler,
-    Route,
-    Connection,
-    prepare,
-    start,
-};

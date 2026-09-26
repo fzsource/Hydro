@@ -14,6 +14,10 @@
   .col--difficulty
     width: rem(70px)
     text-align: center
+  
+  &[lang="en"]
+    .col--difficulty
+      width: rem(95px)
 
   .col--ac-tried
     width: rem(100px)
@@ -33,19 +37,6 @@
 .widget--category-filter
   &__category
     margin-bottom: rem(6px)
-
-    &-tag
-      display: inline-block
-      padding: rem(5px 6px)
-
-      &:hover
-        color: #FFF
-        background: $primary-color
-        text-decoration: none
-
-      &.selected
-        color: #FFF
-        background: $secondary-color
 
   &__drop
     position: relative
@@ -76,19 +67,19 @@
   &__subcategory
     margin: rem(2px)
     display: inline-block
+  
+  &__tag
+    display: inline-block
+    padding: rem(5px 6px)
 
-    &-tag
-      display: inline-block
-      padding: rem(5px 6px)
+    &:hover
+      color: #FFF
+      background: $primary-color
+      text-decoration: none
 
-      &:hover
-        color: #FFF
-        background: $primary-color
-        text-decoration: none
-
-      &.selected
-        color: #FFF
-        background: $secondary-color
+    &.selected
+      color: #FFF
+      background: $secondary-color
 
 .drop-target-attached-right .widget--category-filter__drop
   margin-right: 0
@@ -122,6 +113,82 @@
 .data-table > thead > tr
   height: 54.9px
 
+.search-container
+  padding-bottom: 0
+
+  .title
+    margin-bottom: rem(5px)
+
+  .dialog-button
+    font-size: rem($font-size-secondary)
+    display: inline-block
+    padding: rem(5px 6px)
+    margin-bottom: rem(5px)
+
+.search-tag__item
+  display: inline-block
+  padding: rem(5px 6px)
+  font-size: rem($font-size-secondary)
+  margin-bottom: rem(5px)
+
+  &:hover    
+    color: #555;
+    background: #f4f4f4;
+    text-decoration: none
+
+  &.selected
+    color: #FFF
+    background: $primary-color !important
+
+  &.hide 
+    display: none
+    opacity: 0    
+
+.category-filter__header
+  [data-category-container].list
+    overflow-x: auto
+
+  .list
+    .list__item
+      padding: 12px 12px
+      cursor: pointer
+      margin: 0px 10px
+      background: #eeeff3
+      min-width: 90px
+      text-align: center
+      position: relative
+
+      &.selected
+        background: $primary-color
+        color: #FFF
+        font-weight: bold
+
+    .list__item::first
+      margin-left: 0px
+
+.category-filter__body
+  margin: 12px 10px 0 10px
+  background: #f7f7f7
+  max-height: rem(400px)
+  overflow-y: auto  
+
+  .subcategory-container
+    &.hide
+      display: none
+      opacity: 0
+
+    & h2
+      font-size: rem($font-size)
+      font-weight: bold
+      margin-bottom: 16px
+
+    .divider
+      border-bottom: 1px solid #e5e5e5
+      margin: rem(16px) 0
+
+    .search-tag__item
+      background: #eaeaea;
+
 .search
   width: 100%
   position: relative
@@ -137,7 +204,7 @@
   color: #000000
 
 .search > button
-  width: 40px
+  width: 37px
   height: 36px
   border: 1px solid #00B4CC
   background: #00B4CC
@@ -148,6 +215,16 @@
 
 .search > div
   position: absolute
-  right: 50px
-  top: 8px
+  right: 170px
+  top: 10px
   font-size: rem(17px)
+
+.search-sort
+  position: absolute
+  border: none
+  top: 1px
+  height: 34px
+  right: 37px
+  color: #000000
+  cursor: pointer
+  width: 120px

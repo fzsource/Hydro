@@ -1,87 +1,67 @@
 #!/usr/bin/env node
+require('@hydrooj/register');
 
-/* eslint-disable consistent-return */
-
-const map = {};
-require('source-map-support').install({
-    handleUncaughtExceptions: false,
-    environment: 'node',
-    retrieveSourceMap(file) {
-        if (map[file]) {
-            return {
-                url: file,
-                map: map[file],
-            };
+const packageBasedir = require('path').resolve(__dirname, '..');
+const { homedir } = require('os');
+const { default: hook } = require('@undefined-moe/require-resolve-hook');
+const { bypass } = hook(/^(hydrooj|@hydrooj|cordis|lodash|js-yaml)($|\/)/, (id) => {
+    if (id.startsWith('hydrooj/src') && !('__DISABLE_HYDRO_DEPRECATION_WARNING__' in global)) {
+        if (process.env.DEV) {
+            const error = new Error(`module require via ${id} is deprecated.`);
+            const filter = [
+                'node:diagnostics', 'node:internal',
+                '_resolveFilename', 'ignoreModuleNotFoundError',
+                'framework/register', '@hydrooj/register',
+            ];
+            error.stack = error.stack.split('\n')
+                .filter((i) => !filter.some((f) => i.includes(f)))
+                .join('\n');
+            console.error(error);
+        } else {
+            console.warn('Module require via %s is deprecated.', id);
         }
-        return null;
-    },
-});
-const path = require('path');
-const vm = require('vm');
-const fs = require('fs-extra');
-const esbuild = require('esbuild');
-const { default: hook } = require('require-resolve-hook');
-const { bypass } = hook(/^hydrooj/, (id) => bypass(() => require.resolve(id)));
-
-if (!process.env.NODE_APP_INSTANCE) process.env.NODE_APP_INSTANCE = '0';
-const major = +process.version.split('.')[0].split('v')[1];
-const minor = +process.version.split('.')[1];
-
-function transform(filename) {
-    const code = fs.readFileSync(filename, 'utf-8');
-    const result = esbuild.transformSync(code, {
-        sourcefile: filename,
-        sourcemap: 'both',
-        format: 'cjs',
-        loader: 'tsx',
-        target: `node${major}.${minor}`,
-        jsx: 'transform',
+    }
+    if (id.startsWith('hydrooj')) {
+        return bypass(() => require.resolve(id, { paths: [packageBasedir] }));
+    }
+    return bypass(() => {
+        try {
+            return require.resolve(id);
+        } catch (_) {
+            try {
+                return require.resolve(id, { paths: [`${process.cwd()}/node_modules`] });
+            } catch (e) {
+                try {
+                    return require.resolve(id.replace(/^@hydrooj\//, './'), { paths: [`${homedir()}/.hydro/addons`] });
+                } catch (er) {
+                    return id;
+                }
+            }
+        }
     });
-    if (result.warnings.length) console.warn(result.warnings);
-    map[filename] = result.map;
-    return result.code;
+}, { ignoreModuleNotFoundError: false });
+
+Error.stackTraceLimit = 50;
+
+// Replace pnp paths.
+// Vscode will try to open a local file for links, so this doesn't work for remote-ssh, etc.
+if (process.env.npm_execpath && !process.env.SSH_CONNECTION) {
+    const original = Error.prepareStackTrace;
+    if (process.env.npm_execpath.includes('yarn')) {
+        Error.prepareStackTrace = function capture(...args) {
+            return original.apply(this, args).split('\n').filter((i) => !i.includes('.pnp')).join('\n');
+        };
+    }
+    if (process.env.npm_execpath.includes('pnpm')) {
+        Error.prepareStackTrace = function capture(...args) {
+            const res = original.apply(this, args);
+            if (!res.includes('.pnpm')) return res;
+            return res.replace(
+                /([( ])([^( ]+\/\.pnpm\/.+?\/node_modules\/)(.+)(:\d+:[^)\n]+)/g,
+                '$1\u001B]8;;$2$3$4\u0007pnpm:$3$4\u001B]8;;\u0007',
+            );
+        };
+    }
 }
-const ESM = ['p-queue', 'p-timeout'];
-const _script = new vm.Script('"Hydro"', { produceCachedData: true });
-const bytecode = (_script.createCachedData && _script.createCachedData.call)
-    ? _script.createCachedData()
-    : _script.cachedData;
-require.extensions['.js'] = function loader(module, filename) {
-    if (ESM.filter((i) => filename.includes(i)).length || major < 14) {
-        return module._compile(transform(filename), filename);
-    }
-    const content = fs.readFileSync(filename, 'utf-8');
-    return module._compile(content, filename);
-};
-require.extensions['.ts'] = require.extensions['.tsx'] = function loader(module, filename) {
-    return module._compile(transform(filename), filename);
-};
-require.extensions['.jsc'] = function loader(module, filename) {
-    const buf = fs.readFileSync(filename);
-    bytecode.slice(12, 16).copy(buf, 12);
-    if (![12, 13, 14, 15, 16, 17].filter((i) => process.version.startsWith(`v${i}`)).length) {
-        bytecode.slice(16, 20).copy(buf, 16);
-    }
-    // eslint-disable-next-line no-return-assign
-    const length = buf.slice(8, 12).reduce((sum, number, power) => sum += number * (256 ** power), 0);
-    let dummyCode = '';
-    if (length > 1) dummyCode = `"${'\u200b'.repeat(length - 2)}"`;
-    const script = new vm.Script(dummyCode, {
-        filename,
-        lineOffset: 0,
-        displayErrors: true,
-        cachedData: buf,
-    });
-    if (script.cachedDataRejected) throw new Error(`cacheDataRejected on ${filename}`);
-    const compiledWrapper = script.runInThisContext({
-        filename,
-        lineOffset: 0,
-        columnOffset: 0,
-        displayErrors: true,
-    });
-    const dirname = path.dirname(filename);
-    const args = [module.exports, require, module, filename, dirname, process, global];
-    return compiledWrapper.apply(module.exports, args);
-};
 
 require('./commands');

@@ -1,213 +1,127 @@
-/* eslint-disable no-await-in-loop */
-import cac from 'cac';
-import type {
-    Db, FilterQuery, ObjectID, OnlyFieldsOfType,
+import {
+    BSON, Db, Filter, ObjectId, OnlyFieldsOfType,
 } from 'mongodb';
-import type { ProblemSolutionHandler } from '../handler/problem';
-import type { UserRegisterHandler } from '../handler/user';
+import type { ConnectionHandler, Handler } from '@hydrooj/framework';
+import pm2 from '@hydrooj/utils/lib/locate-pm2';
+import { Context } from '../context';
 import type {
-    DiscussionDoc, DomainDoc, FileInfo,
-    MessageDoc, ProblemDoc, RecordDoc,
-    Tdoc, TrainingDoc, User,
+    BaseUserDict, ContestBalloonDoc, DiscussionDoc, DomainDoc, FileInfo,
+    MessageDoc, ProblemDict, ProblemDoc, RecordDoc,
+    ScoreboardRow, Tdoc, TrainingDoc, User,
 } from '../interface';
-import { Logger } from '../logger';
 import type { DocType } from '../model/document';
-import type { Handler } from './server';
-
-const _hooks: Record<keyof any, Array<(...args: any[]) => any>> = {};
-const logger = new Logger('bus');
-const argv = cac().parse();
-
-function isBailed(value: any) {
-    return value !== null && value !== false && value !== undefined;
-}
 
 export type Disposable = () => void;
 export type VoidReturn = Promise<any> | any;
 
-/* eslint-disable @typescript-eslint/naming-convention */
-export interface EventMap extends Record<string, any> {
-    'app/started': () => void
-    'app/load/lib': () => VoidReturn
-    'app/load/locale': () => VoidReturn
-    'app/load/template': () => VoidReturn
-    'app/load/script': () => VoidReturn
-    'app/load/setting': () => VoidReturn
-    'app/load/model': () => VoidReturn
-    'app/load/handler': () => VoidReturn
-    'app/load/service': () => VoidReturn
-    'app/exit': () => VoidReturn
+export interface EventMap {
+    'app/listen': () => void;
+    'app/started': () => void;
+    'app/ready': () => VoidReturn;
+    'app/exit': () => VoidReturn;
+    'app/before-reload': (entries: Set<string>) => VoidReturn;
+    'app/reload': (entries: Set<string>) => VoidReturn;
 
-    'database/connect': (db: Db) => void
-    'database/config': () => VoidReturn
+    'subscription/init': (h: ConnectionHandler, privileged: boolean) => VoidReturn;
+    'subscription/subscribe': (channel: string, user: User, metadata: Record<string, string>) => VoidReturn;
+    'subscription/enable': (
+        channel: string, h: ConnectionHandler, privileged: boolean, onDispose: (disposable: () => void) => void,
+    ) => VoidReturn;
 
-    'system/setting': (args: Record<string, any>) => VoidReturn
-    'bus/broadcast': (event: keyof EventMap, ...args: any[]) => VoidReturn
-    'monitor/update': (type: 'server' | 'judge', $set: any) => VoidReturn
+    'app/watch/change': (path: string) => VoidReturn;
+    'app/watch/unlink': (path: string) => VoidReturn;
 
-    'user/message': (uid: number, mdoc: MessageDoc) => void
-    'user/get': (udoc: User) => void
-    'user/delcache': (content: string) => void
+    'database/connect': (db: Db) => void;
+    'database/config': () => VoidReturn;
 
-    'domain/create': (ddoc: DomainDoc) => VoidReturn
-    'domain/before-get': (query: FilterQuery<DomainDoc>) => VoidReturn
-    'domain/get': (ddoc: DomainDoc) => VoidReturn
-    'domain/before-update': (domainId: string, $set: Partial<DomainDoc>) => VoidReturn
-    'domain/update': (domainId: string, $set: Partial<DomainDoc>, ddoc: DomainDoc) => VoidReturn
-    'domain/delete': (domainId: string) => VoidReturn
+    'system/setting': (args: Record<string, any>) => VoidReturn;
+    'system/setting-loaded': () => VoidReturn;
+    'bus/broadcast': (event: keyof EventMap, payload: any, trace?: string) => VoidReturn;
+    'monitor/update': (type: 'server' | 'judge', $set: any) => VoidReturn;
+    'monitor/collect': (info: any) => VoidReturn;
+    'api/update': () => void;
+    'task/daily': () => void;
+    'task/daily/finish': (pref: Record<string, number>) => void;
 
-    'document/add': (doc: any) => VoidReturn
+    'user/message': (uid: number[], mdoc: Omit<MessageDoc, 'to'>) => void;
+    'user/get': (udoc: User) => void;
+    'user/delcache': (content: string | true) => void;
+
+    'user/import/parse': (payload: any, messages: string[]) => VoidReturn;
+    'user/import/create': (uid: number, udoc: any) => VoidReturn;
+
+    'domain/create': (ddoc: DomainDoc) => VoidReturn;
+    'domain/before-get': (query: Filter<DomainDoc>) => VoidReturn;
+    'domain/get': (ddoc: DomainDoc) => VoidReturn;
+    'domain/before-update': (domainId: string, $set: Partial<DomainDoc>) => VoidReturn;
+    'domain/update': (domainId: string, $set: Partial<DomainDoc>, ddoc: DomainDoc) => VoidReturn;
+    'domain/delete': (domainId: string) => VoidReturn;
+    'domain/delete-cache': (domainId: string) => VoidReturn;
+
+    'document/add': (doc: any) => VoidReturn;
     'document/set': <T extends keyof DocType>(
         domainId: string, docType: T, docId: DocType[T],
-        $set: any, $unset: OnlyFieldsOfType<DocType[T], any, true | '' | 1>
-    ) => VoidReturn
+        $set: any, $unset: OnlyFieldsOfType<DocType[T], any, true | '' | 1>,
+    ) => VoidReturn;
 
-    'handler/create': (thisArg: Handler) => VoidReturn
-    'handler/init': (thisArg: Handler) => VoidReturn
-    'handler/before-prepare/UserRegister': (thisArg: UserRegisterHandler) => VoidReturn
-    'handler/before-prepare': (thisArg: Handler) => VoidReturn
-    'handler/before/UserRegister': (thisArg: UserRegisterHandler) => VoidReturn
-    'handler/before': (thisArg: Handler) => VoidReturn
-    'handler/after/UserRegister': (thisArg: UserRegisterHandler) => VoidReturn
-    'handler/after': (thisArg: Handler) => VoidReturn
-    'handler/finish/UserRegister': (thisArg: UserRegisterHandler) => VoidReturn
-    'handler/finish': (thisArg: Handler) => VoidReturn
-    'handler/error': (thisArg: Handler, e: Error) => VoidReturn
-    'handler/solution/get': (thisArg: ProblemSolutionHandler) => VoidReturn
+    'discussion/before-add': (payload: Partial<DiscussionDoc>) => VoidReturn;
+    'discussion/add': (payload: Partial<DiscussionDoc>) => VoidReturn;
 
-    'discussion/before-add': (payload: Partial<DiscussionDoc>) => VoidReturn
-    'discussion/add': (payload: Partial<DiscussionDoc>) => VoidReturn
+    'problem/before-add': (domainId: string, content: string, owner: number, docId: number, doc: Partial<ProblemDoc>) => VoidReturn;
+    'problem/add': (doc: Partial<ProblemDoc>, docId: number) => VoidReturn;
+    'problem/before-edit': (doc: Partial<ProblemDoc>, $unset: OnlyFieldsOfType<ProblemDoc, any, true | '' | 1>) => VoidReturn;
+    'problem/edit': (doc: ProblemDoc) => VoidReturn;
+    'problem/before-del': (domainId: string, docId: number) => VoidReturn;
+    'problem/list': (query: Filter<ProblemDoc>, handler: any, sort?: string[]) => VoidReturn;
+    'problem/get': (doc: ProblemDoc, handler: any) => VoidReturn;
+    'problem/delete': (domainId: string, docId: number) => VoidReturn;
+    'problem/addTestdata': (domainId: string, docId: number, name: string, payload: Omit<FileInfo, '_id'>) => VoidReturn;
+    'problem/renameTestdata': (domainId: string, docId: number, name: string, newName: string) => VoidReturn;
+    'problem/delTestdata': (domainId: string, docId: number, name: string[]) => VoidReturn;
+    'problem/addAdditionalFile': (domainId: string, docId: number, name: string, payload: Omit<FileInfo, '_id'>) => VoidReturn;
+    'problem/renameAdditionalFile': (domainId: string, docId: number, name: string, newName: string) => VoidReturn;
+    'problem/delAdditionalFile': (domainId: string, docId: number, name: string[]) => VoidReturn;
 
-    'problem/before-add': (domainId: string, content: string, owner: number, docId: number, doc: Partial<ProblemDoc>) => VoidReturn
-    'problem/add': (doc: Partial<ProblemDoc>, docId: number) => VoidReturn
-    'problem/before-edit': (doc: Partial<ProblemDoc>) => VoidReturn
-    'problem/edit': (doc: ProblemDoc) => VoidReturn
-    'problem/before-del': (domainId: string, docId: number) => VoidReturn
-    'problem/del': (domainId: string, docId: number) => VoidReturn
-    'problem/list': (query: FilterQuery<ProblemDoc>, handler: any) => VoidReturn
-    'problem/get': (doc: ProblemDoc, handler: any) => VoidReturn
-    'problem/delete': (domainId: string, docId: number) => VoidReturn
-    'problem/addTestdata': (domainId: string, docId: number, name: string, payload: Omit<FileInfo, '_id'>) => VoidReturn
-    'problem/delTestdata': (domainId: string, docId: number, name: string[]) => VoidReturn
-    'problem/addAdditionalFile': (domainId: string, docId: number, name: string, payload: Omit<FileInfo, '_id'>) => VoidReturn
-    'problem/delAdditionalFile': (domainId: string, docId: number, name: string[]) => VoidReturn
+    'contest/before-add': (payload: Partial<Tdoc>) => VoidReturn;
+    'contest/add': (payload: Partial<Tdoc>, id: ObjectId) => VoidReturn;
+    'contest/before-edit': (tdoc: Tdoc, $set: Partial<Tdoc>) => VoidReturn;
+    'contest/edit': (payload: Tdoc) => VoidReturn;
+    'contest/list': (query: Filter<Tdoc>, handler: any) => VoidReturn;
+    'contest/scoreboard': (tdoc: Tdoc, rows: ScoreboardRow[], udict: BaseUserDict, pdict: ProblemDict) => VoidReturn;
+    'contest/balloon': (domainId: string, tid: ObjectId, bdoc: ContestBalloonDoc) => VoidReturn;
+    'contest/del': (domainId: string, tid: ObjectId) => VoidReturn;
 
-    'contest/before-add': (payload: Partial<Tdoc>) => VoidReturn
-    'contest/add': (payload: Partial<Tdoc>, id: ObjectID) => VoidReturn
+    'oplog/log': (type: string, handler: Handler | ConnectionHandler, args: any, data: any) => VoidReturn;
 
-    'training/list': (query: FilterQuery<TrainingDoc>, handler: any) => VoidReturn
-    'training/get': (tdoc: TrainingDoc, handler: any) => VoidReturn
+    'training/list': (query: Filter<TrainingDoc>, handler: any) => VoidReturn;
+    'training/get': (tdoc: TrainingDoc, handler: any) => VoidReturn;
 
-    'record/change': (rdoc: RecordDoc, $set?: any, $push?: any) => void
-    'record/judge': (rdoc: RecordDoc, updated: boolean) => VoidReturn
-}
-/* eslint-enable @typescript-eslint/naming-convention */
+    'record/change': (rdoc: RecordDoc, $set?: any, $push?: any, body?: any) => void;
+    'record/judge': (rdoc: RecordDoc, updated: boolean, pdoc?: ProblemDoc, updater?: any) => VoidReturn;
 
-function getHooks<K extends keyof EventMap>(name: K) {
-    const hooks = _hooks[name] || (_hooks[name] = []);
-    if (hooks.length >= 2048) {
-        logger.warn(
-            'max listener count (2048) for event "%s" exceeded, which may be caused by a memory leak',
-            name,
-        );
-    }
-    return hooks;
+    'auth/before-login': (ctx: Handler, udoc: User) => VoidReturn;
+    'auth/login': (ctx: Handler, udoc: User) => VoidReturn;
 }
 
-export function removeListener<K extends keyof EventMap>(name: K, listener: EventMap[K]) {
-    const index = (_hooks[name] || []).findIndex((callback) => callback === listener);
-    if (index >= 0) {
-        _hooks[name].splice(index, 1);
-        return true;
-    }
-    return false;
-}
-
-export function addListener<K extends keyof EventMap>(name: K, listener: EventMap[K]) {
-    getHooks(name).push(listener);
-    return () => removeListener(name, listener);
-}
-
-export function prependListener<K extends keyof EventMap>(name: K, listener: EventMap[K]) {
-    getHooks(name).unshift(listener);
-    return () => removeListener(name, listener);
-}
-
-export function once<K extends keyof EventMap>(name: K, listener: EventMap[K]) {
-    let dispose;
-    function _listener(...args: any[]) {
-        dispose();
-        return listener.apply(this, args);
-    }
-    _listener.toString = () => `// Once \n${listener.toString()}`;
-    dispose = addListener(name, _listener);
-    return dispose;
-}
-
-export function on<K extends keyof EventMap>(name: K, listener: EventMap[K]) {
-    return addListener(name, listener);
-}
-
-export function off<K extends keyof EventMap>(name: K, listener: EventMap[K]) {
-    return removeListener(name, listener);
-}
-
-export async function parallel<K extends keyof EventMap>(name: K, ...args: Parameters<EventMap[K]>): Promise<void> {
-    const tasks: Promise<any>[] = [];
-    if (argv.options.showBus) logger.debug('parallel: %s %o', name, args);
-    for (const callback of _hooks[name] || []) {
-        if (argv.options.busDetail) logger.debug(callback.toString());
-        tasks.push(callback.apply(this, args));
-    }
-    await Promise.all(tasks);
-}
-
-export function emit<K extends keyof EventMap>(name: K, ...args: Parameters<EventMap[K]>) {
-    return parallel(name, ...args);
-}
-
-export async function serial<K extends keyof EventMap>(name: K, ...args: Parameters<EventMap[K]>): Promise<void> {
-    if (argv.options.showBus) logger.debug('serial: %s %o', name, args);
-    const hooks = Array.from(_hooks[name] || []);
-    for (const callback of hooks) {
-        if (argv.options.busDetail) logger.debug(callback.toString());
-        await callback.apply(this, args);
-    }
-}
-
-export async function bail<K extends keyof EventMap>(name: K, ...args: Parameters<EventMap[K]>): Promise<ReturnType<EventMap[K]>> {
-    if (argv.options.showBus) logger.debug('bail: %s %o', name, args);
-    const hooks = Array.from(_hooks[name] || []);
-    for (const callback of hooks) {
-        let result = callback.apply(this, args);
-        if (result instanceof Promise) result = await result;
-        if (isBailed(result)) return result;
-    }
-    return null;
-}
-
-export function broadcast<K extends keyof EventMap>(event: K, ...payload: Parameters<EventMap[K]>) {
-    return parallel('bus/broadcast', event, payload);
-}
-
-try {
-    if (!process.send) throw new Error();
-    const pm2: typeof import('pm2') = require('pm2');
-    pm2.launchBus((err, bus) => {
-        if (err) throw new Error();
-        bus.on('hydro:broadcast', (packet) => {
-            parallel(packet.data.event, ...packet.data.payload);
+export function apply(ctx: Context) {
+    try {
+        if (!process.send || !pm2 || process.env.exec_mode !== 'cluster_mode') throw new Error('not in cluster mode');
+        pm2.launchBus((err, bus) => {
+            if (err) throw new Error('cannot launch pm2 bus');
+            bus.on('hydro:broadcast', (packet) => {
+                (app.parallel as any)(packet.data.event, ...BSON.EJSON.parse(packet.data.payload));
+            });
+            ctx.on('bus/broadcast', (event, payload) => {
+                process.send({ type: 'hydro:broadcast', data: { event, payload: BSON.EJSON.stringify(payload) } });
+            });
+            console.debug('Using pm2 event bus');
         });
-        on('bus/broadcast', (event, payload) => {
-            process.send({ type: 'hydro:broadcast', data: { event, payload } });
-        });
-        console.debug('Using pm2 event bus');
-    });
-} catch (e) {
-    on('bus/broadcast', (event, payload) => parallel(event, ...payload));
-    console.debug('Using mongodb external event bus');
+    } catch (e) {
+        ctx.on('bus/broadcast', (event, payload) => app.parallel(event, ...payload));
+        console.debug('Using mongodb external event bus');
+    }
 }
 
-global.Hydro.service.bus = {
-    addListener, bail, broadcast, emit, on, off, once, parallel, prependListener, removeListener, serial,
-};
+export default app;
+
+global.bus = app;

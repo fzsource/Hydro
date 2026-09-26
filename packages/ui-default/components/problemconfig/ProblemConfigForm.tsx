@@ -1,31 +1,31 @@
-import React from 'react';
+import { Card, Switch, Text, TextInput } from '@mantine/core';
+import { isEqual } from 'lodash';
+import React, { useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import i18n from 'vj/utils/i18n';
-import {
-  Card, Tab, Tabs, InputGroup, Tag,
-} from '@blueprintjs/core';
-import type { RootState } from './reducer/index';
-import CustomSelectAutoComplete from '../autocomplete/components/CustomSelectAutoComplete';
+import { i18n } from 'vj/utils';
 import FileSelectAutoComplete from '../autocomplete/components/FileSelectAutoComplete';
+import LanguageSelectAutoComplete from '../autocomplete/components/LanguageSelectAutoComplete';
 import { FormItem } from './BasicForm';
 import ProblemType from './ProblemType';
-import { TaskConfig } from './SubtaskTable';
+import type { RootState } from './reducer/index';
 
 function FileIOConfig() {
   const filename = useSelector((state: RootState) => state.config.filename);
   const dispatch = useDispatch();
   return (
-    <FormItem columns={12} label="FileIOConfig" disableLabel>
-      <Card style={{ padding: 10 }}>
+    <FormItem columns={6} label="FileIOConfig" disableLabel>
+      <Card withBorder style={{ padding: 10, overflow: 'visible' }}>
         <div className="row">
-          <FormItem columns={6} label="FileIO">
-            <InputGroup
-              rightElement={<Tag minimal>.in/.out</Tag>}
+          <FormItem columns={12} label="FileIO">
+            <TextInput
+              rightSection={<Text size="sm">.in/.out</Text>}
+              rightSectionWidth={100}
+              rightSectionPointerEvents="none"
               value={filename || ''}
               onChange={(ev) => {
-                dispatch({ type: 'CONFIG_FORM_UPDATE', key: 'filename', value: ev.currentTarget.value });
+                dispatch({ type: 'problemconfig/updateFileIO', filename: ev.currentTarget.value });
               }}
-              fill
+              style={{ width: '100%' }}
             />
           </FormItem>
         </div>
@@ -34,78 +34,90 @@ function FileIOConfig() {
   );
 }
 
+function MultiPassConfig() {
+  const multiPass = useSelector((state: RootState) => state.config.multi_pass);
+  const dispatch = useDispatch();
+  const [enabled, setEnabled] = useState(multiPass > 1);
+  return (
+    <FormItem columns={6} label="Multi-pass" disableLabel>
+      <Card withBorder style={{ padding: 10, overflow: 'visible' }}>
+        <div className="row">
+          <FormItem columns={6} label="Multi Pass">
+            <Switch
+              styles={{ body: { display: 'flex', height: '36px', alignItems: 'center' } }}
+              checked={enabled}
+              label={i18n('Enabled')}
+              onChange={() => {
+                setEnabled(!enabled);
+                dispatch({ type: 'CONFIG_FORM_UPDATE', key: 'multi_pass', value: enabled ? 0 : 2 });
+              }}
+            />
+          </FormItem>
+          {enabled && (
+            <FormItem columns={6} label={i18n('Max Passes')}>
+              <TextInput
+                type="number"
+                min={2}
+                max={10}
+                value={multiPass}
+                onChange={(ev) => dispatch({ type: 'CONFIG_FORM_UPDATE', key: 'multi_pass', value: +ev.currentTarget.value })}
+              />
+            </FormItem>
+          )}
+        </div>
+      </Card>
+    </FormItem>
+  );
+}
+
 function ExtraFilesConfig() {
   const Files = useSelector((state: RootState) => state.testdata);
-  const userExtraFiles = useSelector((state: RootState) => state.config.user_extra_files) || [];
-  const judgeExtraFiles = useSelector((state: RootState) => state.config.judge_extra_files) || [];
+  const userExtraFiles = useSelector((state: RootState) => state.config.user_extra_files || [], isEqual);
+  const judgeExtraFiles = useSelector((state: RootState) => state.config.judge_extra_files || [], isEqual);
   const dispatch = useDispatch();
-  const userRef = React.useRef<any>();
-  const judgeRef = React.useRef<any>();
-  React.useEffect(() => {
-    userRef.current.setSelectedKeys(userExtraFiles);
-  }, [JSON.stringify(userExtraFiles)]);
-  React.useEffect(() => {
-    judgeRef.current.setSelectedKeys(judgeExtraFiles);
-  }, [JSON.stringify(judgeExtraFiles)]);
   return (
-    <FormItem columns={12} label="ExtraFilesTabs" disableLabel>
-      <Tabs id="ExtraFilesTabs">
-        <Tab
-          id="user_extra_files"
-          title={i18n('user_extra_files')}
-          panel={(
+    <FormItem columns={12} label="ExtraFilesConfig" disableLabel>
+      <Card withBorder style={{ padding: 10, overflow: 'visible' }}>
+        <div className="row">
+          <FormItem columns={12} label={i18n('user_extra_files')}>
             <FileSelectAutoComplete
-              ref={userRef}
               data={Files}
               selectedKeys={userExtraFiles}
               onChange={(val) => dispatch({ type: 'CONFIG_FORM_UPDATE', key: 'user_extra_files', value: val.split(',') })}
               multi
             />
-          )}
-        />
-        <Tab
-          id="judge_extra_files"
-          title={i18n('judge_extra_files')}
-          panel={(
+          </FormItem>
+          <FormItem columns={12} label={i18n('judge_extra_files')}>
             <FileSelectAutoComplete
-              ref={judgeRef}
               data={Files}
               selectedKeys={judgeExtraFiles}
               onChange={(val) => dispatch({ type: 'CONFIG_FORM_UPDATE', key: 'judge_extra_files', value: val.split(',') })}
               multi
             />
-          )}
-        />
-      </Tabs>
+          </FormItem>
+        </div>
+      </Card>
     </FormItem>
   );
 }
 
 function LangConfig() {
   const langs = useSelector((state: RootState) => state.config.langs) || [];
-  const prefixes = new Set(Object.keys(LANGS).filter((i) => i.includes('.')).map((i) => i.split('.')[0]));
-  const data = Object.keys(LANGS).filter((i) => !prefixes.has(i))
-    .map((i) => ({ name: LANGS[i].display, _id: i }));
   const dispatch = useDispatch();
-  const ref = React.useRef<any>();
-  const selectedKeys = langs.filter((i) => !prefixes.has(i));
-  React.useEffect(() => {
-    ref.current.setSelectedKeys(selectedKeys);
-  }, [JSON.stringify(selectedKeys)]);
   return (
-    <FormItem columns={12} label="langs">
-      <CustomSelectAutoComplete
-        ref={ref}
-        data={data}
-        placeholder={i18n('Unlimited')}
-        selectedKeys={selectedKeys}
-        onChange={(val) => {
-          const value = val.split(',');
-          value.push(...Array.from(new Set(value.filter((i) => i.includes('.')).map((i) => i.split('.')[0]))));
-          dispatch({ type: 'CONFIG_FORM_UPDATE', key: 'langs', value });
-        }}
-        multi
-      />
+    <FormItem columns={12} label="langs" disableLabel>
+      <Card withBorder style={{ padding: 10, overflow: 'visible' }}>
+        <div className="row">
+          <FormItem columns={12} label="langs">
+            <LanguageSelectAutoComplete
+              placeholder={!langs.length ? i18n('Unlimited') : i18n('Code language')}
+              selectedKeys={langs}
+              onChange={(value) => dispatch({ type: 'CONFIG_FORM_UPDATE', key: 'langs', value: value.split(',') })}
+              multi
+            />
+          </FormItem>
+        </div>
+      </Card>
     </FormItem>
   );
 }
@@ -116,9 +128,9 @@ export default function ProblemConfigForm() {
     <div className="row problem-config-form">
       <ProblemType />
       {Type === 'default' && <FileIOConfig />}
+      {['default', 'interactive'].includes(Type) && <MultiPassConfig />}
       {!['submit_answer', 'objective'].includes(Type) && (
         <>
-          <TaskConfig />
           <ExtraFilesConfig />
           <LangConfig />
         </>

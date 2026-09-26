@@ -1,6 +1,6 @@
-import _ from 'lodash';
+import $ from 'jquery';
 import DOMAttachedObject from 'vj/components/DOMAttachedObject';
-import delay from 'vj/utils/delay';
+import { delay } from 'vj/utils';
 
 const ANIMATION_DURATION = 4000;
 
@@ -56,7 +56,7 @@ export default class Rotator extends DOMAttachedObject {
       return;
     }
     let fromPosition;
-    if (parseFloat(value) > parseFloat(this.value)) {
+    if (Number.parseFloat(value) > Number.parseFloat(this.value)) {
       fromPosition = POS_BELOW;
     } else {
       fromPosition = POS_ABOVE;
@@ -73,5 +73,3 @@ export default class Rotator extends DOMAttachedObject {
     return this.value;
   }
 }
-
-_.assign(Rotator, DOMAttachedObject);

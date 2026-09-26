@@ -1,102 +1,101 @@
-/* eslint-disable import/no-dynamic-require */
-/* eslint-disable no-await-in-loop */
 import os from 'os';
 import path from 'path';
 import cac from 'cac';
 import fs from 'fs-extra';
+import { Context } from '../context';
 import { Logger } from '../logger';
-import options from '../options';
-import * as bus from '../service/bus';
-import db from '../service/db';
+import SystemModel from '../model/system';
+import { load } from '../options';
+import { MongoService } from '../service/db';
+import { SettingService } from '../settings';
 import {
-    handler, lib, locale, model, script, service, setting, template,
+    addon, builtinModel, locale, model, service,
 } from './common';
 
+const argv = cac().parse();
 const logger = new Logger('worker');
-const detail = cac().parse().options.loaderDetail;
 const tmpdir = path.resolve(os.tmpdir(), 'hydro');
 
-export async function load() {
+export async function apply(ctx: Context) {
     fs.ensureDirSync(tmpdir);
-    require('../lib/i18n');
     require('../utils');
     require('../error');
-    const config = require('../options')();
-    if (!process.env.CI && !config) {
+    require('../service/bus').apply(ctx);
+    const url = await MongoService.getUrl();
+    if (!url) {
         logger.info('Starting setup');
-        return require('./setup').load();
+        await require('./setup').load(ctx);
     }
     const pending = global.addons;
     const fail = [];
-    const active = [];
-    if (detail) logger.info('start');
+    await locale(pending, fail);
+    await ctx.plugin(MongoService, load() || {});
+    await ctx.plugin(SettingService);
+    await ctx.plugin(SystemModel.Service);
+    ctx = await new Promise((resolve) => {
+        ctx.inject(['loader', 'setting', 'db', 'model:system'], (c) => {
+            resolve(c);
+        });
+    });
+    await ctx.plugin(require('../service/hmr').default, { watch: argv.options.watch });
     await Promise.all([
-        locale(pending, fail),
-        template(pending, fail),
+        ctx.loader.reloadPlugin(require.resolve('../service/storage'), 'file'),
+        ctx.loader.reloadPlugin(require.resolve('../service/worker'), 'worker'),
+        ctx.loader.reloadPlugin(require.resolve('../service/server'), 'server'),
     ]);
-    if (detail) logger.info('finish: locale/template/static');
-    const opts = options();
-    await db.start(opts);
-    if (detail) logger.info('finish: db.connect');
-    const modelSystem = require('../model/system');
-    await modelSystem.runConfig();
-    if (detail) logger.info('finish: config');
-    const storage = require('../service/storage');
-    await storage.start();
-    if (detail) logger.info('finish: storage.connect');
+    ctx = await new Promise((resolve) => {
+        ctx.inject(['server'], (c) => {
+            resolve(c);
+        });
+    });
     require('../lib/index');
-    if (detail) logger.info('finish: lib.builtin');
-    await lib(pending, fail);
-    if (detail) logger.info('finish: lib.extra');
-    require('../service/monitor');
-    if (detail) logger.info('finish: monitor');
-    const server = require('../service/server');
-    await server.prepare();
-    if (detail) logger.info('finish: server');
-    await service(pending, fail);
-    if (detail) logger.info('finish: service.extra');
-    require('../model/index');
-    if (detail) logger.info('finish: model.builtin');
-    require('../handler/index');
-    if (detail) logger.info('finish: handler.builtin');
-    await model(pending, fail);
-    if (detail) logger.info('finish: model.extra');
-    const modelSetting = require('../model/setting');
-    await setting(pending, fail, modelSetting);
-    if (detail) logger.info('finish: setting');
-    await handler(pending, fail);
-    if (detail) logger.info('finish: handler.extra');
-    for (const i in global.Hydro.handler) await global.Hydro.handler[i]();
-    if (detail) logger.info('finish: handler.apply');
-    const notfound = require('../handler/notfound');
-    await notfound.apply();
-    require('../script/index');
-    if (detail) logger.info('finish: script.builtin');
-    await script(pending, fail, active);
-    if (detail) logger.info('finish: script.extra');
-    await bus.serial('app/started');
-    if (detail) logger.info('finish: bus.serial(start)');
-    await server.start();
-    if (detail) logger.info('finish: server.start');
+
+    ctx.plugin(require('../service/monitor'));
+    ctx.plugin(require('../service/check').default);
+    await service(pending, fail, ctx);
+    await builtinModel(ctx);
+    await model(pending, fail, ctx);
+    ctx = await new Promise((resolve) => {
+        ctx.inject(['worker', 'setting'], (c) => {
+            resolve(c);
+        });
+    });
+    const loadDir = async (dir: string) => Promise.all((await fs.readdir(dir)).filter((i) => i.endsWith('.ts'))
+        .map((h) => ctx.loader.reloadPlugin(path.resolve(dir, h), '')));
+    await loadDir(path.resolve(__dirname, '..', 'handler'));
+    await ctx.plugin(require('../service/migration').default);
+    await addon(pending, fail, ctx);
+    await loadDir(path.resolve(__dirname, '..', 'script'));
+    await ctx.parallel('app/started');
     if (process.env.NODE_APP_INSTANCE === '0') {
-        const scripts = require('../upgrade').default;
-        let dbVer = (await modelSystem.get('db.ver')) ?? 0;
-        const isFresh = !dbVer;
-        const expected = scripts.length;
-        while (dbVer < expected) {
-            const func = scripts[dbVer];
-            if (typeof func !== 'function' || (isFresh && func.toString().includes('_FRESH_INSTALL_IGNORE'))) {
-                dbVer++;
-                continue;
-            }
-            logger.info('Upgrading database: from %d to %d', dbVer, expected);
-            const result = await func();
-            if (!result) break;
-            dbVer++;
-            await modelSystem.set('db.ver', dbVer);
+        const staticDir = path.join(os.homedir(), '.hydro/static');
+        await fs.emptyDir(staticDir);
+        // Use ordered copy to allow resource override
+        for (const f of Object.values(global.addons)) {
+            const dir = path.join(f, 'public');
+            // eslint-disable-next-line no-await-in-loop
+            if (await fs.pathExists(dir)) await fs.copy(dir, staticDir);
         }
+        await new Promise((resolve, reject) => {
+            ctx.inject(['migration'], async (c) => {
+                c.migration.registerChannel('hydrooj', require('../upgrade').coreScripts);
+                try {
+                    await c.migration.doUpgrade();
+                    resolve(null);
+                } catch (e) {
+                    logger.error('Upgrade failed: %O', e);
+                    reject(e);
+                }
+            });
+        });
     }
-    logger.success('Server started');
-    if (process.send) process.send('ready');
-    return { active, fail };
+    ctx.inject(['server'], async ({ server }) => {
+        await server.listen();
+        await ctx.parallel('app/listen');
+        logger.success('Server started');
+        process.send?.('ready');
+        process.title = `HydroOJ (v${global.Hydro.version.hydrooj}, worker ${process.env.NODE_APP_INSTANCE}${process.env.DEV ? ', debug' : ''})`;
+        await ctx.parallel('app/ready');
+    });
+    return { fail };
 }

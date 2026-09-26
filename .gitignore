@@ -6,15 +6,18 @@ dist/
 /build/*.js
 .cache/
 *.log
-*.d.ts
 *.js.map
 *.tsbuildinfo
 *.hydro
 .coverage
+coverage
+.nyc_output
 benchmark.json
 globalConfig.json
 *.out
 .clinic/
+.direnv/
+.omc/
 .yarn/cache
 .yarn/build-state.yml
 .yarn/unplugged
@@ -26,7 +29,10 @@ globalConfig.json
 /config.yaml
 /config.json
 yarn.lock
+pnpm-lock.yaml
 tsconfig.json
+tsconfig.*.json
+.oxlintrc.json
 
 # Project Rules
 ## Core
@@ -34,7 +40,7 @@ packages/**/*.js
 !/build/*.js
 !**/bin/*.js
 !*.page.js
-!/install/jssh.d.ts
+!packages/register/index.js
 ## ui-default
 !packages/ui-default/**/*.js
 !packages/geoip/download.js
@@ -42,7 +48,9 @@ packages/**/*.js
 packages/ui-default/public
 packages/ui-default/misc/.iconfont
 packages/ui-default/static/locale
-plugins/**
+packages/ui-next/public
+/plugins/
+/modules/
 
 # Data files
 *.mmdb
@@ -53,3 +61,9 @@ __*
 !__mocks__
 !.gitkeep
 *.local
+
+# Monokle
+.monokle
+
+packages/*/public/assets
+node_modules.*

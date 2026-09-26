@@ -1,4 +1,6 @@
+__flag: 🇬🇧
 __id: en
+__interface: yes
 __langname: English
 Can be Extended For: Extension
 contest_create: Contest Create
@@ -7,13 +9,18 @@ contest_detail_problem: Problem Detail
 contest_detail: Contest Detail
 contest_edit: Contest Edit
 contest_main: Contest
+contest_manage: Contest Management
+contest_print: Print
+contest_problemlist: Problem List
 contest_scoreboard: Scoreboard
+contest_user: Attendee Manage
 discussion_create: Create Discussion
 discussion_detail: Discussion Detail
 discussion_edit: Discussion Edit
 discussion_main: Discussion
 discussion_node: Discussion
 display_name: Display Name
+domain_create: Create Domain
 domain_dashboard: Dashboard
 domain_discussion: Discussion Nodes
 domain_edit: Edit Info
@@ -39,15 +46,18 @@ homework_main: Homework
 homework_scoreboard: Scoreboard
 judge_playground: Judge Playground
 main: Home
+manage_config: System Configurations
 manage_dashboard: System
 manage_module: Module Management
 manage_script: Scripts
 manage_setting: System Settings
 manage_user_import: Import Users
+manage_user_priv: User Privilege
 manage: System Manage
 no_translation_warn: <blockquote class="warn">This part of content is under translation.</blockquote>
 page.problem_detail.sidebar.show_category: Click to Show
 page.training_detail.invalid_when_not_enrolled: You cannot view problem details unless enrolled.
+page.training_detail.see_other_user_detail: You are viewing user {0} training details.
 pager_first: « First
 pager_last: Last »
 pager_next: Next ›
@@ -55,14 +65,17 @@ pager_previous: ‹ Previous
 perm_contest: Contests
 perm_discussion: Discussions
 perm_general: General
+perm_homework: Homework
 perm_problem_solution: Problem Solutions
 perm_problem: Problems
+perm_ranking: Ranking
 perm_record: Records
 perm_training: Trainings
 problem_create: Problem Create
 problem_detail: Problem Detail
 problem_edit: Problem Edit
 problem_files: Problem Files
+problem_hack: Hack
 problem_import: Import Problem
 problem_main: Problem Set
 problem_solution: Problem Solution
@@ -100,4 +113,6 @@ user_login: Login
 user_logout: Logout
 user_lostpass: Lost Password
 user_register: Register
+user_sudo: Entering Sudo Mode
+wiki_about: About
 wiki_help: Help

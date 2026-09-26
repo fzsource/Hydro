@@ -1,11 +1,14 @@
-import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
+import './monaco.styl';
+
+import $ from 'jquery';
 import { EditorAction, registerEditorAction } from 'monaco-editor/esm/vs/editor/browser/editorExtensions';
+import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import { IQuickInputService } from 'monaco-editor/esm/vs/platform/quickinput/common/quickInput';
 import list from 'monaco-themes/themes/themelist.json';
 import { nanoid } from 'nanoid';
-import i18n from 'vj/utils/i18n';
-import request from 'vj/utils/request';
-import './monaco.styl';
+import { i18n, request } from 'vj/utils';
+
+export { renderMarkdown } from 'monaco-editor/esm/vs/base/browser/markdownRenderer';
 
 export default monaco;
 export const customOptions: monaco.editor.IStandaloneDiffEditorConstructionOptions = JSON.parse(localStorage.getItem('editor.config') || '{}');
@@ -84,6 +87,8 @@ function handlePasteEvent(editor: monaco.editor.IStandaloneCodeEditor) {
       ext = 'zip';
     }
     if (!ext) return;
+    ev.preventDefault();
+    ev.stopPropagation();
     const filename = `${nanoid()}.${ext}`;
     const data = new FormData();
     data.append('filename', filename);
@@ -128,7 +133,7 @@ function handlePasteEvent(editor: monaco.editor.IStandaloneCodeEditor) {
         console.error(e);
         updateText(`${i18n('Upload Failed')}: ${e.message}`);
       });
-  });
+  }, { capture: true });
 }
 
 export function registerAction(
@@ -145,7 +150,9 @@ export function registerAction(
         monaco.KeyMod.WinCtrl | monaco.KeyCode.Enter,
       ],
       run: () => {
-        $(element).closest('form').submit();
+        const form = $(element).closest('form');
+        if (form.find('[data-default-submit]').length) form.find('[data-default-submit]').click();
+        else form.submit();
       },
     });
   }

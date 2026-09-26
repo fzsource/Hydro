@@ -1,10 +1,11 @@
 // Modified from jquery-pjax to support multiple fragments and jQuery 3.0
 // https://github.com/defunkt/jquery-pjax/blob/master/jquery.pjax.js
 
+import $ from 'jquery';
 import { nanoid } from 'nanoid';
+import NProgress from 'nprogress';
 import Notification from 'vj/components/notification';
-import NProgress from 'vj/components/nprogress';
-import request from './request';
+import { request, withTransitionCallback } from './base';
 
 const pjax = {};
 
@@ -89,38 +90,36 @@ pjax.request = async (opt) => {
       window.history.replaceState(currentState, null, meta.url);
     }
     if (meta.title) document.title = meta.title;
-    data.fragments.forEach((fragment) => {
+    for (const fragment of data.fragments) {
       if (process.env.NODE_ENV !== 'production') {
         if (fragment.html === undefined) {
-          // eslint-disable-next-line quotes
-          throw new Error(`Fragement should contain 'html'`);
+          throw new Error("Fragement should contain 'html'");
         }
       }
       const $el = $(fragment.html.trim());
       if (process.env.NODE_ENV !== 'production') {
         if ($el.length === 0) {
-          // eslint-disable-next-line quotes
-          throw new Error(`Unable to build elements from fragment 'html'`);
+          throw new Error("Unable to build elements from fragment 'html'");
         }
       }
       const fragmentId = $el.attr('data-fragment-id');
       if (process.env.NODE_ENV !== 'production') {
         if (!fragmentId) {
-          // eslint-disable-next-line quotes
-          throw new Error(`Unable to extract fragment id from fragment 'html'`);
+          throw new Error("Unable to extract fragment id from fragment 'html'");
         }
       }
       const $target = $(`[data-fragment-id="${fragmentId}"]`);
       if (process.env.NODE_ENV !== 'production') {
         if ($target.length === 0) {
-          // eslint-disable-next-line quotes
-          throw new Error(`Unable to get target fragment from fragment id`);
+          throw new Error('Unable to get target fragment from fragment id');
         }
       }
       $target.trigger('vjContentRemove');
-      $target.replaceWith($el);
-      $el.trigger('vjContentNew');
-    });
+      await withTransitionCallback(() => {
+        $target.replaceWith($el);
+        $el.trigger('vjContentNew');
+      });
+    }
   } catch (err) {
     if (!err.aborted) {
       Notification.error(err.message);
@@ -147,4 +146,3 @@ function handlePopState(ev) {
 $(window).on('popstate', handlePopState);
 
 export default pjax;
-window.Hydro.utils.pjax = pjax;

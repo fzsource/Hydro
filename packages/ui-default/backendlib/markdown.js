@@ -23,7 +23,7 @@ const MergeCells = require('markdown-it-merge-cells');
 // @[youtube](https://youtube.com/watch?v=xxx)
 // @[pdf](https://foo.com/bar.pdf)
 const { Media } = require('./markdown-it-media');
-const Katex = require('./markdown-it-katex');
+const { default: Katex } = require('./markdown-it-katex');
 const { xssProtector } = require('./markdown-it-xss');
 
 class Markdown extends MarkdownIt {
@@ -59,7 +59,6 @@ function renderInline(text) {
   return md.renderInline(text);
 }
 
-// eslint-disable-next-line no-multi-assign
-global.Hydro.lib.markdown = module.exports = {
+module.exports = {
   md, plugin, render, renderInline,
 };

@@ -1,9 +1,12 @@
+__flag: 🇨🇳
 __id: zh
+__interface: yes
 __langname: 简体中文
 '"{data}" copied to clipboard!': “{data}”已复制到剪贴板！
+'{0} {1} delete your discussion reply {2} in "{3}"({4}).': '{0} {1} 从讨论 {3}({4}) 删除了你的回复 {2}。'
 '{0} comments': '{0} 条评论'
 '{0} discussions': '{0} 条讨论'
-'{0} is a moderator of this domain.': '{}是这个域的管理者之一。'
+'{0} is a moderator of this domain.': '{0}是这个域的管理者之一。'
 '{0} limit exceeded (limit: {2} operations in {1} seconds).': '{0} 超过频率限制。限制：{1} 秒内最多 {2} 次操作。'
 '{0} problems': '{0} 道题'
 '{0} sections': '{0} 小节'
@@ -25,10 +28,15 @@ __langname: 简体中文
 'Copy failed :(': '复制失败 :('
 'Current dataset: {0}': '当前测试数据: {0}'
 'Discussion: Terms Of Service': 讨论区服务条款
-'Format: category 1, sub category 1.1, sub category 1.2, ..., sub category 1.x, ..., category n, sub category n.1, sub category n.2, ..., sub category n.m, ...': 格式：分类1, 子分类1.1, 子分类1.2, ..., 子分类1.x, ..., 分类n, 子分类n.1, 子分类n.2, ..., 子分类n.m, ...
+'First Blood Notice\n{0} solved problem {1} ({2})': '题目一血提示\n{0} 解决了题目 {1} ({2})'
+'Format: category 1, sub category 1.1, sub category 1.2, ..., sub category 1.x, ..., category n, sub category n.1, sub category n.2, ..., sub category n.m, ...': 格式：分类 1, 子分类 1.1, 子分类 1.2, ..., 子分类 1.x, ..., 分类 n, 子分类 n.1, 子分类 n.2, ..., 子分类 n.m, ...
+'Format: one group per line, CSV: groupName,uid1,uid2,...': '格式：每行一个小组，CSV：组名,UID1,UID2,...'
 'Join {0}': '加入 {0}'
 'No': 否
 'Note: Problem title may not be hidden.': 注意：题目标题可能不会被隐藏。
+'On line {0}: Read {1}, expect {2}.': 第 {0} 行的答案错误，读取到 {1}，但期望 {2}。
+'Or upload a file:': 或者上传一个文件：
+'Original score: {0}': '原得分: {0}'
 'Role {1} already exists in domain {0}.': '域 {0} 中已存在角色 {1}。'
 'Solved {0} problems, RP: {1} (No. {2})': '解决了 {0} 道题目，RP: {1} (No. {2})'
 'The value `{1}` of {0} already exists.': '{0} 的值 `{1}` 已经存在。'
@@ -59,6 +67,8 @@ Add new data: 添加新数据
 Add User: 添加用户
 Add: 添加
 Additional File: 附加文件
+Admin {0} delete your discussion "{1}".: 管理员 {0} 删除了你的讨论 "{1}"。
+Admin {0} delete your discussion tail reply {1} in "{2}"({3}).: 管理员 {0} 从讨论 {2}({3}) 中删除了你的楼中楼回复 {1}。
 All {0} Contests: 所有 {0} 比赛
 All Contests: 所有比赛
 All Homeworks: 所有作业
@@ -83,8 +93,12 @@ Attend Contest: 参加比赛
 Attend contests: 参加比赛
 Attended: 已参加
 author: 作者
+Auto adjust the format of line breaks and remove unnecessary whitespace characters.: 自动调整换行符格式，并移除不必要的空白字符。
 Auto format code: 自动格式化代码
+Auto organize input: 自动整理输入
 Avatar: 头像
+Back to contest list: 返回比赛列表
+Background: 背景
 Be Copied: 被复制
 Begin at: 开始于
 Begin Date: 开始日期
@@ -92,10 +106,6 @@ Begin Time: 开始时间
 Belongs to: 属于
 Bio Visibility: 个人简介可见性
 Bio: 个人简介
-blog_detail: 博客详情
-blog_edit: 编辑博客
-blog_main: 博客
-Blog: 博客
 Bold: 加粗
 Boom!: 炸了！
 Browser: 浏览器
@@ -147,21 +157,33 @@ Contact Us: 联系我们
 Contact: 联系
 content: 内容
 Content: 内容
+Contest {0} has a new clarification about {1}, please go to contest clarifications page to reply.: 比赛 {0} 有一条关于 {1} 的新答疑，请前往比赛答疑页面回复。
+Contest {0} jury replied to your clarification, please go to contest page to view.: 比赛 {0} 的裁判回复了您的答疑，请前往比赛页面查看。
+Contest Clarifications: 赛时答疑
+Contest Management: 比赛管理
 Contest scoreboard is not visible.: 当前比赛成绩表隐藏，暂不可显示。
 Contest Scoreboard: 比赛成绩表
+contest_balloon: 气球状态
+contest_clarification: 赛时答疑
 contest_create: 创建比赛
 contest_detail_problem_submit: 递交比赛题目
 contest_detail_problem: 题目详情
 contest_detail: 比赛详情
 contest_edit: 编辑比赛
 contest_main: 比赛
+contest_manage: 比赛管理
+contest_print: 打印
+contest_problemlist: 题目列表
 contest_scoreboard: 比赛成绩表
+contest_user: 参赛者管理
+contest: 比赛
 Contest: 比赛
 Contests per page: 每页展示的比赛数量
 Continue: 继续
 Contributed Problems: 贡献的题目
 Contributions: 贡献
 Copy Email: 复制电子邮件
+Copy the content below: 复制下方的内容
 Copy from: 复制自
 Copy QQ Number: 复制QQ号
 Copy WeChat Account: 复制微信号
@@ -254,6 +276,7 @@ Domain {0} is bulit-in and cannot be modified.: 域 {0} 为内置，不可修改
 Domain {0} not found.: 域 {0} 不存在。
 Domain ID cannot be changed once the domain is created.: 在创建后不能更改 ID。
 Domain ID: 域 ID
+domain_create: 创建域
 domain_dashboard: 管理域
 domain_discussion: 讨论节点
 domain_edit: 编辑域资料
@@ -270,6 +293,7 @@ Domain: 域
 Don't have an account?: 还没有账户？
 Done: 已结束
 Download Dataset: 下载数据集
+Download Hack Input: 下载 Hack 输入
 Download link copied to clipboard!: 下载链接已复制到剪贴板。
 Download: 下载
 Downvote: 差评
@@ -318,8 +342,8 @@ Evaluated difficulty: 估计的难度
 expand: 展开
 Expire: 过期
 Export All Code: 导出所有代码
-Export as CSV: 导出为 CSV
-Export as HTML: 导出为 HTML
+Export as {0}: 导出为 {0}
+Export Groups: 批量导出小组
 Extension (days): 最长延期 (日)
 Extension Score Penalty: 延期递交扣分规则
 Failed to join the domain. You are already a member.: 加入域失败，您已是该域的成员。
@@ -336,6 +360,7 @@ Formula blocks: 公式区块
 fs_upload: 上传文件
 Gender Visibility: 性别可见性
 Gender: 性别
+General Issue: 一般问题
 Hard Deadline: 最终截止时间
 Hash: 散列
 Have ALL PERMISSIONS in this domain: 在此域中拥有全部权限
@@ -366,6 +391,7 @@ homework_detail_problem_submit: 递交作业题目
 homework_detail_problem: 题目详情
 homework_detail: 作业详情
 homework_edit: 编辑作业
+homework_files: 作业文件
 homework_main: 作业
 homework_scoreboard: 作业成绩表
 homework_status: 作业成绩表
@@ -378,9 +404,11 @@ If left blank, the built-in template of the corresponding language will be used.
 Images: 图片
 Import From Hydro: 从 Hydro 导入
 Import from: 导入自
+Import Groups: 批量导入小组
 Import Problem: 导入题目
 Import User: 导入用户
 Import: 导入
+Imported successfully.: 导入成功。
 In 1 day: 一天后
 In 1 month: 一个月后
 In 1 week: 一周后
@@ -433,6 +461,7 @@ List View: 列表视图
 Live: 正在进行
 Live...: 正在进行…
 Location: 位置
+Lock discussions: 锁定讨论
 Lock Topic: 锁定主题
 Login to Attend Contest: 登录后参加比赛
 Login to Claim Homework: 登录后认领作业
@@ -456,9 +485,44 @@ Manage: 管理
 Manager: 管理
 Mark Green: 标绿
 Mark Yellow: 标黄
+Materials: 材料
 Max files for user: 单用户最大文件数量
 Max files per problem: 单题最大文件数量
 Max files size per problem: 单题最大总文件大小
+Max members per contest team: 每个参赛队伍最大成员数
+Accept: 接受
+Reject: 拒绝
+Allow Team: 允许团队
+Allow team participation: 允许团队参赛
+Choose how you want to participate in this contest.: 选择你参加本次比赛的方式。
+Create a Team: 创建队伍
+'Create a team, invite teammates by their username, then choose "Team Participation" when attending an allow-team contest.': 创建队伍，按用户名邀请队友，之后在报名允许团队的比赛时选择“团队参赛”。
+How It Works: 使用说明
+Invitation code: 邀请码
+Invitation code is required.: 必须填写邀请码。
+Invitation sent: 邀请已发送
+Invite Member: 邀请成员
+Leave Team: 退出队伍
+Leave this team? You may lose access to team contests.: 确定退出该队伍吗？退出后你可能无法访问该队伍参加的比赛。
+Manage Teams: 管理队伍
+Members: 成员
+My Teams: 我的队伍
+Once enabled, team participation cannot be disabled for this contest.: 一旦启用，该比赛将无法关闭团队参赛。
+Pending Invites: 待处理邀请
+Personal Participation: 个人参赛
+Please select a team.: 请选择一个队伍。
+Rename: 重命名
+Revoke: 撤销
+Save: 保存
+Successfully attended: 报名成功
+Team: 队伍
+Team Participation: 团队参赛
+Team name: 队伍名称
+Team participation is not allowed for this contest.: 该比赛不允许团队参赛。
+Teams let multiple users participate in a contest together, sharing one set of submissions.: 队伍允许多名用户共同参加比赛，共享同一份提交记录。
+You are not in any team.: 你还没有加入任何队伍。
+You are not in any team yet. Create one from the panel on the right, or ask a teammate to invite you by your username.: 你还没有加入任何队伍。在右侧面板创建一个，或请队友按你的用户名邀请你。
+'You have {0} pending team invite(s)': '你有 {0} 个待处理的队伍邀请'
 Max pretest count per minute: 每分钟自测数量限制
 Max submission count per minute: 每分钟提交数量限制
 Max total file size for user: 单用户最大总文件大小
@@ -476,11 +540,11 @@ My Files: 我的文件
 My Profile: 我的资料
 My Recent Submissions: 我的最近递交记录
 My Role: 我的角色
+My status: 我的状态
 name: 名称
 Name: 名称
 Network error: 网络错误
 Never expire: 从不过期
-New dataset: 新测试数据
 New Email: 新电子邮件
 New file: 新文件
 New Password: 新密码
@@ -488,7 +552,7 @@ New Training Plan: 新训练计划
 New: 创建
 No comments so far...: 目前还没有评论...
 No dataset at present.: 暂无测试数据。
-no discussion yet...: 目前没有讨论…
+No discussion yet...: 目前没有讨论…
 No Permission to Attend Contest: 您没有权限参加比赛
 No Permission to Claim Homework: 您没有权限认领作业
 No Permission to Create a Discussion: 您没有权限创建讨论
@@ -510,10 +574,12 @@ Numeric PID: 数字题号
 Oh, the user doesn't have any contributions!: 啊哦，这个用户还没贡献过题目~
 Oh, the user hasn't created any discussions yet!: 这个用户还没有发布过讨论
 Oh, the user hasn't submitted yet!: 这个用户还没有交过题 _(:зゝ∠)_
+Oh, there are no tasks that match the filter!: 喔，目前没有符合过滤条件的任务。
+Oh, there is no clarification!: 喔，目前没有答疑！
 Oh, there is no task in the queue!: 喔，队列中目前没有任务。
-Oh, there is no task that matches the filter!: 喔，目前没有符合过滤条件的任务。
 Ok: 确定
 Only A-Z, a-z, 0-9 and _ are accepted: 只接受 A-Z, a-z, 0-9 和 _
+Only Partic.: 仅参赛者
 Oops, there are no results.: 呀，没有结果。
 Oops!: Oops!
 Open in Problem Set: 在题库中打开
@@ -523,6 +589,7 @@ Open Source: 开源
 Open: 开放
 Operating System: 操作系统
 Ops: 运维
+Or paste CSV content: 或粘贴 CSV 内容
 Or, with automatically filled invitation code: 或者，这是可以自动填写邀请码的
 Ordered List: 有序列表
 Original Score: 原始分数
@@ -531,6 +598,7 @@ Output Format: 输出格式
 Owner: 所有者
 page.problem_detail.sidebar.show_category: 点击显示
 page.training_detail.invalid_when_not_enrolled: 未参加训练计划时您不能查看题目详情。
+page.training_detail.see_other_user_detail: 您正在查看用户 {0} 的训练详情。
 pager_first: « 第一页
 pager_last: 末页 »
 pager_next: 下一页 ›
@@ -554,9 +622,11 @@ perm_record: 记录
 perm_training: 训练
 Permission: 权限
 Permissions: 权限
-Pick a problem randomly based on current filter: 根据当前过滤条件随机选择一道题
+Phone: 手机号
+Pick a problem randomly based on the current filter.: 根据当前过滤条件随机选择一道题
 pid: 题目 ID
 Pin discussions: 置顶讨论
+Pin training plans: 置顶训练计划
 Plan: 计划
 Please attend contest to see the problems.: 请参加比赛来查看题目。
 Please claim the assignment to see the problems.: 认领作业后才可以查看作业内容。
@@ -568,9 +638,11 @@ Pretest Your Code: 使用自定义数据测试
 Pretest: 自测
 Pretest?: 自测?
 Preview: 预览
+Print: 打印
 Privacy: 隐私
 Problem {1} not found.: 题目 {1} 不存在。
 Problem Categories: 题目标签
+Problem Category: 标签
 Problem Data: 题目数据
 Problem Description: 题目描述
 Problem ID List: 题目 ID 列表
@@ -583,6 +655,7 @@ problem_create: 创建题目
 problem_detail: 题目详情
 problem_edit: 编辑题目
 problem_files: 题目文件
+problem_hack: Hack
 problem_import: 导入题目
 problem_main: 题库
 problem_solution: 题解
@@ -611,6 +684,8 @@ Quit Scratchpad: 退出在线编程模式
 Quote: 引用
 Rank: 排名
 ranking: 排名
+Ranking: 排名
+Read record codes after accept: 题目通过后读取记录的代码
 Recalculates nSubmit and nAccept in problem status.: 重新计算每道题目的 AC 量和提交量
 Recommended: 推荐
 Record {0} not found.: 记录 {0} 不存在。
@@ -659,6 +734,7 @@ Sample: 样例
 Save All Changes: 保存所有修改
 Saved session expire seconds: 保存的会话的过期秒数
 Saved session: 已保存的会话
+School: 学校
 score canceled: 成绩取消
 Score: 分数
 Scoreboard (Hidden): 成绩表 (隐藏)
@@ -671,9 +747,13 @@ Section: 章节
 Security: 安全
 Select a node to create discussion.: 选择一个节点来发表讨论。
 Select a role: 选择一个角色
+Select Category: 选择标签
 Select User: 选择用户
+Selected categories: 已选标签
 Selected roles have been deleted.: 所选角色已删除。
 Selected users have been removed from the domain.: 所选用户已从此域中移除。
+Send Broadcast Message: 发送公告
+Send Clarification Request: 提问
 Send Code after acceptance: 通过题目后发送源代码
 Send Message: 发送站内信息
 Send Password Reset Email: 发送密码重置邮件
@@ -719,6 +799,7 @@ Sorry: 对不起
 Sort by: 排序
 Source type: 来源类型
 Split View: 分屏预览
+Standard answer longer than user output.: 答案比您的输出长。
 Star Topic: 收藏讨论
 Star: 收藏
 Starred Problems: 收藏的题目
@@ -732,6 +813,8 @@ Storage engine bucket: 存储桶名称
 Storage engine endPoint: 存储桶 endPoint
 Storage engine region: 存储桶地域
 Storage engine secret: 存储桶 secretKey
+Student ID: 学号
+Subject: 主题
 Submission Statistics: 递交统计
 Submission: 递交
 Submissions: 递交
@@ -742,6 +825,7 @@ Sync problem filelist from s3 service: 从 S3 同步题目文件列表。
 Tags: 标签
 Target: 目标
 Technical Information: 技术信息
+Technical Issue: 技术问题
 Temporary session: 临时会话
 Terms of Service: 服务条款
 Test data comes from: 测试数据来自
@@ -751,22 +835,24 @@ The discussion is locked, you can not reply anymore.: 此讨论已经锁定，�
 The homework's deadline is due but in extension. You can still submit for this problem but your score will be penalized.: 作业已超过截止时间，但仍在延期时间内。您递交题目将无法获得全部分数。
 The invitation code to enter to successfully join the domain. You can only use letters and numbers in the code and it should not be longer than 64 characters.: 加入此域的邀请码。您只能使用字母和数字，并且不能长于 64 个字符。
 The invitation code you provided is invalid.: 您提供的邀请码无效。
+The link is either invalid or expired.: 加域链接无效或已过期。
 The link will be expired at {0}: 链接将于 {0} 过期
 The role to assign when user joining the domain.: 用户加入此域时分配的角色。
 The uploaded file is too long.: 上传的文件太长。
 The user is already a member of the domain.: 该用户已是域的成员。
 The user is too lazy to leave something here...: 该用户太懒，这里啥也没写 (´・ω・｀)
-Their account will not be deleted and they will be with the default role.: 他们的账号不会被删除，并且之后将以 default 角色访问。
+theme: 主题
 There are no contests...: 没有比赛…
 There is no homework so far ╰(*°▽°*)╯: 目前还没有作业 ╰(*°▽°*)╯
 This contest is not live.: 比赛没有开始。
+This contest has already started.: 比赛已开始。
 This email was sent by {0} automatically, and please do not reply directly.: 这封邮件由 {0} 自动发送，请勿直接回复。
 This homework is not open and you cannot view problems.: 该作业还未到开放时间，您无法查看作业题目。
 This homework is not open.: 该作业还未开放递交。
 This is the current session: 这是当前的会话
 This message will be presented to those whose submissions are accepted.: 这条消息将会被展示给通过此题的用户。
 This page needs JavaScript to work.: 这个页面需要 Javascript。
-This person is lazy and didn't wrote anything.: 该用户太懒，这里啥也没写 (´・ω・｀)
+This person is lazy and didn't write anything.: 该用户太懒，这里啥也没写 (´・ω・｀)
 This section cannot be challenged at present, so please complete the following sections first: 该章节目前不可挑战，请先完成以下章节
 This type of files are not allowed to be uploaded.: 不允许上传这种文件。
 Time (Seconds): 耗时 (秒)
@@ -788,6 +874,7 @@ Training requirement is not satisfied.: 不满足训练条件。
 training_create: 创建训练
 training_detail: 训练详情
 training_edit: 编辑训练
+training_files: 训练文件
 training_main: 训练
 Training: 训练
 Trainings per page: 每页展示的训练数量
@@ -806,6 +893,7 @@ Unstar: 取消收藏
 Update Permission: 更新权限
 Update Settings: 更新设置
 Update: 更新
+Upload CSV File: 上传 CSV 文件
 Upload File: 上传文件
 Upload Problem: 上传题目
 Upload: 上传
@@ -827,6 +915,7 @@ user_logout: 登出
 user_lostpass: 忘记密码
 user_register_mail_sent: 注册邮件已发送
 user_register: 注册
+user_sudo: 用户安全授权
 User-defined role: 用户定义的角色
 User: 用户
 Username / UID: 用户名或 UID
@@ -838,11 +927,14 @@ Valid for registered users who are not members of the domain: 对域外注册用
 Valid for visitors: 对未登录的游客有效
 Verify register email: 注册需邮件验证
 Version: 版本
+View all contests: 查看所有比赛
+View all homework: 查看所有作业
 View contest scoreboard: 查看比赛成绩表
 View Contest: 查看比赛
 View contests: 查看比赛
 View Details: 查看详情
 View discussions: 查看讨论
+View domain user private info: 显示域中用户的私有信息
 View hidden contest submission status and scoreboard: 查看隐藏的比赛递交状态和成绩表
 View hidden homework submission status and scoreboard: 查看隐藏的作业递交状态和成绩表
 View hidden problems: 查看隐藏的题目
@@ -853,6 +945,7 @@ View or create discussion: 查看与发表讨论
 View or submit solution: 查看与发表题解
 View Owned Problems: 查看自己的题目
 View Owned Training Plans: 查看自己的训练计划
+View problem solutions after accept: 题目通过后查看题解
 View problem solutions: 查看题解
 View Problem: 查看题目
 View problems: 查看题目
@@ -874,6 +967,7 @@ What's domain?: 什么是域？
 What's script?: 什么是脚本？
 What's this?: 这是什么？
 Whether to show tags in the problem list.: 是否在题目列表中显示题目的标签。
+wiki_about: 关于
 Will be used as the domain icon.: 将被用作系统图标。
 With this feature, you can copy problems that you can view from a domain to some other domain. Their title, content, tags and categories will be copied. However, their test data are not copied directly.: 您可以通过这个功能将某域下您能查看的题目复制到其它域中，题目的标题、描述、标签与分类将被复制过来。但是测试数据不会被直接复制。
 With this feature, you can import problems that you can view from a site to here. Their title, content, tags and categories will be imported. However, their test data are not copied directly.: 您可以通过这个功能将其他 OJ 的题目导入到本站。题目的标题、题面、标签和分类将会被直接导入，测试数据将会在后台自动导入。
@@ -882,16 +976,18 @@ Write Your Comment: 发表您的评论
 Write Your Solution: 发表您的题解
 WYSIWYG: 所见即所得
 Year: 年
-You are not allowed to join the domain. The link is either invalid or expired.: 您无法加入该域，链接无效或已过期。
-You can create your own training plans and share with others.: 您可以创建您自己的训练计划并且与他人分享。
+You are banned by the domain moderator.: 您被该域的管理员封禁。
+You are not allowed to join domain {0}. {1}: 您无法加入 {0}。{1}
+You can create your own training plans and share them with others.: 您可以创建您自己的训练计划并且与他人分享。
 You cannot submit for this problem because the contest is ended. You can click "Open in Problem Set" to view this problem in normal mode.: 该比赛已结束，您无法在比赛模式下递交该题目。您可以点击“在题库中打开”以普通模式查看和递交本题。
 You cannot submit for this problem because the homework's deadline is due.: 作业已超过截止时间，您无法递交本题目。
 You cannot visit this domain.: 您不能访问此域。
 You don't have the required permission ({0}) in this domain.: 您在该域中无相应权限 ({0})。
 You don't have the required privilege.: 您没有相应的特权。
 You don't own any domain and don't have privilege to create domain.: 您不拥有任何域也没有创建域的特权。
+You have been kicked from domain {0} by {1}.: 您已被 {1} 从域 {0} 中移除。
 You have not submitted any solutions for this problem: 您在该题下没有递交过任何解答
-You have permissions to create problems for this domain.: 您有权限为此域创建题目。
+You have permission to create problems for this domain.: 您有权限为此域创建题目。
 You have uncompleted domain creation operation. You can click "Continue" to finish the creation.: 您有未完成的创建域操作。您可以点击“继续”来完成创建。
 You haven't attended this contest yet.: 您还没有参加本次比赛。
 You haven't claimed this homework yet.: 您还未认领过该作业。

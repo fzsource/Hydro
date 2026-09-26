@@ -1,17 +1,35 @@
+import { formatSeconds } from '@hydrooj/utils/lib/common';
 import NProgress from 'nprogress';
 import { NamedPage } from 'vj/misc/Page';
+import { addSpeculationRules, tpl } from 'vj/utils';
 
-export default new NamedPage(['contest_detail', 'contest_detail_problem'], () => {
-  const beginAt = new Date(UiContext.tdoc.beginAt).getTime();
-  const endAt = new Date(UiContext.tdoc.endAt).getTime();
+const contestTimer = $(tpl`<pre class="contest-timer" style="display:none"></pre>`);
+contestTimer.appendTo(document.body);
+
+export default new NamedPage(['contest_detail', 'contest_problemlist', 'contest_detail_problem', 'contest_scoreboard'], () => {
+  const beginAt = new Date((UiContext.tdoc.duration && UiContext.tsdoc?.startAt) || UiContext.tdoc.beginAt).getTime();
+  const endAt = new Date(UiContext.tsdoc?.endAt || UiContext.tdoc.endAt).getTime();
   NProgress.configure({ trickle: false, showSpinner: false, minimum: 0 });
   function updateProgress() {
     const now = Date.now();
-    if (beginAt <= now && now <= endAt) NProgress.set((now - beginAt) / (endAt - beginAt));
-    else if (now > endAt) NProgress.set(1);
-    else NProgress.set(0);
+    if (beginAt <= now && now <= endAt) {
+      NProgress.set((now - beginAt) / (endAt - beginAt));
+      contestTimer.show();
+      contestTimer.text(formatSeconds(Math.floor((endAt - now) / 1000)));
+    } else contestTimer.hide();
   }
   NProgress.start();
   updateProgress();
-  setInterval(updateProgress, 5000);
+  setInterval(updateProgress, 1000);
+
+  addSpeculationRules({
+    prerender: [{
+      where: {
+        or: [
+          { href_matches: '/p/*' },
+          { href_matches: '/d/*/p/*' },
+        ],
+      },
+    }],
+  });
 });

@@ -5,6 +5,9 @@ export interface SandboxVersion {
     os: string;
     copyOutOptional?: boolean;
     pipeProxy?: boolean;
+    addressSpaceLimit?: boolean;
+    stream?: boolean;
+    procPeak?: boolean;
 }
 
 export interface LocalFile {
@@ -25,8 +28,25 @@ export interface Collector {
     pipe?: boolean;
 }
 
+// Symlink creates symlink for copyIn location: v1.6.0+
+export interface Symlink {
+    symlink: string;
+}
+
+// StreamIn enables the stream input on /stream interface: v1.8.1+
+export interface StreamIn {
+    streamIn: boolean;
+}
+
+// StreamOut enables the stream out on /stream interface: v1.8.1+
+export interface StreamOut {
+    streamOut: boolean;
+}
+
 export type CopyInFile = LocalFile | MemoryFile | PreparedFile;
-export type CmdFile = LocalFile | MemoryFile | PreparedFile | Collector | null;
+export type CopyIn = Record<string, CopyInFile>;
+// CmdFile defines file descriptor for the command. null is reserved for group execution and it must be provided via pipeMapping
+export type CmdFile = LocalFile | MemoryFile | PreparedFile | Collector | StreamIn | StreamOut | null;
 
 /**
  * Cmd defines a single command to be executed by sandbox server
@@ -49,11 +69,15 @@ export interface Cmd {
     cpuRateLimit?: number;
     /** cpuSetLimit defines cpu set limit if enabled in sandbox server */
     cpuSetLimit?: string;
-    /** strictMemoryLimit set rlimit_data limit for memoryLimit */
+    /** @deprecated use dataSegmentLimit instead, keep compatibility for old versions */
     strictMemoryLimit?: boolean;
+    /** dataSegmentLimit set rlimit_data limit for memoryLimit */
+    dataSegmentLimit?: boolean;
+    /** addressSpaceLimit set rlimit_address_space limit for memoryLimit */
+    addressSpaceLimit?: boolean;
 
     /** files to be copied into sandbox before execution */
-    copyIn?: Record<string, CopyInFile>;
+    copyIn?: Record<string, CopyInFile | Symlink>;
 
     /**
      * files to be copied out from sandbox after execution.
@@ -134,10 +158,33 @@ export interface SandboxResult {
     memory: number;
     /** wall clock time in ns */
     runTime: number;
+    /** peak count of processes (thread) during execution */
+    procPeak?: number;
     /** copyOut file name to content (UTF-8 encoded and invalid character replaced) */
     files?: Record<string, string>;
     /** copyOutCached file name to fileId */
     fileIds?: Record<string, string>;
     /** contains detailed error if status is FileError */
     fileError?: FileError[];
+}
+
+export interface Resize {
+    index?: number;
+    fd?: number;
+    rows: number;
+    cols: number;
+    x?: number;
+    y?: number;
+}
+
+export interface Input {
+    index?: number;
+    fd?: number;
+    content: Buffer;
+}
+
+export interface Output {
+    index: number;
+    fd: number;
+    content: Buffer;
 }

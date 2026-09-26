@@ -1,39 +1,40 @@
-/* eslint-disable import/no-import-module-exports */
-/* eslint-disable import/no-extraneous-dependencies */
+import path from 'path';
+import { size } from '@hydrooj/utils/lib/utils';
 import cac from 'cac';
-import fs from 'fs-extra';
-import webpack from 'webpack';
-import WebpackDevServer from 'webpack-dev-server';
-import gulp from 'gulp';
-import log from 'fancy-log';
 import chalk from 'chalk';
-import pkg from '../package.json';
-import root from './utils/root';
-import gulpConfig from './config/gulp';
+import fs from 'fs-extra';
+import { globbySync } from 'globby';
+import webpack, { Stats } from 'webpack';
+import WebpackDevServer from 'webpack-dev-server';
 import webpackConfig from './config/webpack';
+import root from './utils/root';
 
 const argv = cac().parse();
 
 async function runWebpack({
-  watch, production, measure, dev,
+  watch, production, measure, dev, https,
 }) {
-  const compiler = webpack(webpackConfig({ watch, production, measure }));
+  const compiler = webpack(await webpackConfig({ watch, production, measure }));
   if (dev) {
-    const server = new WebpackDevServer(compiler, {
+    const server = new WebpackDevServer({
+      port: https ? 8001 : 8000,
       compress: true,
       hot: true,
-      disableHostCheck: true,
-      stats: 'none',
-      index: root('public'),
-      proxy: {
-        context: (path) => !path.includes('sockjs-node'),
+      server: https ? 'https' : 'http',
+      allowedHosts: 'all',
+      proxy: [{
+        context: (p) => p !== '/ws',
         target: 'http://localhost:2333',
         ws: true,
+      }],
+      client: {
+        webSocketURL: 'auto://0.0.0.0:0/ws',
       },
-    });
-    return server.listen(8000);
+    }, compiler);
+    server.start();
+    return;
   }
-  return new Promise((resolve, reject) => {
+  const res = await new Promise<Stats>((resolve, reject) => {
     function compilerCallback(err, stats) {
       if (err) {
         console.error(err.stack || err);
@@ -43,60 +44,79 @@ async function runWebpack({
         return;
       }
       if (argv.options.detail) console.log(stats.toString());
-      if (!watch && (!stats || stats.hasErrors())) process.exitCode = 1;
-      resolve(null);
+      if (!watch && (!stats || stats.hasErrors())) {
+        if (!argv.options.detail) console.log(stats.toString());
+        process.exitCode = 1;
+      }
+      resolve(stats);
     }
     if (watch) compiler.watch({}, compilerCallback);
     else compiler.run(compilerCallback);
   });
-}
-
-async function runGulp() {
-  function handleError(err) {
-    log(chalk.red('Error: %s'), chalk.reset(err.toString() + err.stack));
-    process.exit(1);
+  if (production && res && !res.hasErrors()) {
+    const stats = {};
+    const files = fs.readdirSync(root('public'), { withFileTypes: true });
+    for (const file of files) {
+      if (!file.isFile() || file.name.endsWith('.map')) continue;
+      const data = await fs.stat(path.join(root('public'), file.name));
+      const key = file.name
+        .replace(/\.[a-f0-9]{6}\.chunk\./, '.chunk.')
+        .replace(/\.[a-f0-9]{6}\.worker\./, '.worker.')
+        .replace(/\.[a-f0-9]{6}\.e\.js/, '.e.js');
+      stats[key] = data.size;
+    }
+    const statsPath = root('__bundleInfo');
+    let oldTotal = 0;
+    let newTotal = 0;
+    if (fs.existsSync(statsPath)) {
+      console.log('Compare to last production bundle:');
+      const oldStats = JSON.parse(await fs.readFile(statsPath, 'utf-8')) as Record<string, number>;
+      for (const key in stats) oldStats[key] ||= 0;
+      const entries: [filename: string, orig: number, curr: number][] = [];
+      for (const [key, value] of Object.entries(oldStats)) {
+        oldTotal += value;
+        newTotal += stats[key] || 0;
+        if (Math.abs((stats[key] || 0) - value) > 25) entries.push([key, value, stats[key] || 0]);
+      }
+      const sorted = entries.sort((i) => i[1] - i[2]);
+      sorted.push(['Total', oldTotal, newTotal]);
+      for (const entry of sorted) {
+        const [name, orig, curr] = entry;
+        const diff = 100 * (curr - orig) / orig;
+        if (Math.abs(diff) < 0.01 && name !== 'Total') continue;
+        const color = orig > curr ? chalk.green : chalk.red;
+        console.log(color(`${name.padStart(35)} ${size(orig).padStart(10)} -> ${size(curr).padEnd(10)} (${diff.toPrecision(5)}%)`), chalk.reset());
+      }
+    }
+    await fs.writeFile(statsPath, JSON.stringify(stats));
   }
-  const gulpTasks = gulpConfig({ production: true, errorHandler: handleError });
-  return new Promise((resolve) => {
-    const taskList = {};
-
-    gulp.on('start', ({ uid, name }) => {
-      log(chalk.blue('Starting task: %s'), chalk.reset(name));
-      taskList[uid] = true;
-    });
-    gulp.on('stop', ({ uid, name }) => {
-      log(chalk.green('Finished: %s'), chalk.reset(name));
-      taskList[uid] = false;
-      if (Object.values(taskList).filter((b) => b).length === 0) resolve(null);
-    });
-    gulpTasks.default();
-  });
 }
 
 async function main() {
   const dir = process.cwd();
   process.chdir(root());
-  if (argv.options.gulp) await runGulp();
-  else {
+  if (argv.options.iconfont) {
+    const { default: svgtofont } = await import('svgtofont');
+    await svgtofont({
+      src: root('misc/icons'),
+      dist: root('misc/.iconfont'),
+      styleTemplates: root('misc/icons/template'),
+      classNamePrefix: 'icon',
+      fontName: 'hydro-icons',
+      css: true,
+      startUnicode: 0xEA01,
+      svg2ttf: {
+        timestamp: 1577836800, // 2020-1-1
+      },
+      svgicons2svgfont: {
+        fontHeight: 1000,
+        descent: 6.25 / 100 * 1000,
+        normalize: true,
+      },
+    });
+  } else {
     await runWebpack(argv.options as any);
-    if (fs.existsSync('public/hydro.js')) {
-      fs.copyFileSync('public/hydro.js', `public/hydro-${pkg.version}.js`);
-    }
-    if (fs.existsSync('public/polyfill.js')) {
-      fs.copyFileSync('public/polyfill.js', `public/polyfill-${pkg.version}.js`);
-    }
-    if (fs.existsSync('public/default.theme.css')) {
-      fs.copyFileSync('public/default.theme.css', `public/default-${pkg.version}.theme.css`);
-    }
-    if (argv.options.production) {
-      fs.removeSync('public/vditor/dist/js/mathjax');
-      fs.removeSync('public/vditor/dist/js/echarts');
-      fs.removeSync('public/vditor/dist/js/graphviz');
-      fs.removeSync('public/vditor/dist/js/mermaid');
-      fs.removeSync('public/vditor/dist/js/abcjs');
-      const files = fs.readdirSync('public');
-      files.filter((i) => /(^[in]\..+|worker)\.js\.map$/.test(i)).forEach((i) => fs.removeSync(`public/${i}`));
-    }
+    await Promise.all(globbySync('public/**/*.map').map((i) => fs.remove(i)));
   }
   process.chdir(dir);
 }

@@ -1,9 +1,8 @@
-import { AutoloadPage } from 'vj/misc/Page';
-import request from 'vj/utils/request';
-import i18n from 'vj/utils/i18n';
-import tpl from 'vj/utils/tpl';
+import $ from 'jquery';
+import { NamedPage } from 'vj/misc/Page';
+import { i18n, request, tpl } from 'vj/utils';
 
-const hitokotoPage = new AutoloadPage('hitokotoPage', () => {
+export default new NamedPage('homepage', () => {
   function getHitokoto($containers) {
     $containers.get().forEach((container) => {
       request.get('https://v1.hitokoto.cn?c=a&c=b&c=c&c=d&c=e&c=f')
@@ -19,10 +18,4 @@ const hitokotoPage = new AutoloadPage('hitokotoPage', () => {
     });
   }
   if ($('[name="hitokoto"]')) getHitokoto($('[name="hitokoto"]'));
-  $(document).on('vjContentNew', (e) => {
-    const elem = $(e.target).find('[name="hitokoto"]');
-    if (elem.get) getHitokoto(elem);
-  });
 });
-
-export default hitokotoPage;

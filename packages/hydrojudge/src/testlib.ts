@@ -1,12 +1,12 @@
-import { STATUS } from '@hydrooj/utils/lib/status';
+import { DetailType, STATUS } from '@hydrooj/common';
 
-const operation = /^\s*(status|score)\((\d+)\)\s*(.*)$/m;
+const operation = /^\s*(status|score)\((\d+)\)\s*((\S|$).*)$/m;
 
-export function parse(output: string, fullscore: number) {
+export function parse(output: string, fullscore: number, detail: DetailType) {
     let status = STATUS.STATUS_WRONG_ANSWER;
     let score = 0;
     let builder = (msg: string) => msg;
-    let message = output.substring(0, 1024);
+    let message = `${output.substring(0, 1024)} `;
     if (output.startsWith('ok ')) {
         status = STATUS.STATUS_ACCEPTED;
         score = fullscore;
@@ -29,8 +29,7 @@ export function parse(output: string, fullscore: number) {
         if (p === 1) {
             status = STATUS.STATUS_ACCEPTED;
             score = fullscore;
-            const base = output.replace('points ', '') || '';
-            message = base.substring(base.indexOf(' '), 1024);
+            message = output.replace(/^points [\d.]+ /, '') || '';
         } else score = Math.floor(fullscore * p);
     }
     while (operation.test(message)) {
@@ -52,5 +51,5 @@ export function parse(output: string, fullscore: number) {
             score = +val;
         }
     }
-    return { status, score, message: builder(message) };
+    return { status, score, message: builder(detail === 'full' ? message : '') };
 }

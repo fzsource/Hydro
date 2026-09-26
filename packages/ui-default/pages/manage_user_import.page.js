@@ -1,8 +1,7 @@
-import { NamedPage } from 'vj/misc/Page';
+import $ from 'jquery';
 import Notification from 'vj/components/notification';
-import i18n from 'vj/utils/i18n';
-import request from 'vj/utils/request';
-import delay from 'vj/utils/delay';
+import { NamedPage } from 'vj/misc/Page';
+import { delay, i18n, request } from 'vj/utils';
 
 const page = new NamedPage('manage_user_import', () => {
   async function post(draft) {
@@ -12,9 +11,13 @@ const page = new NamedPage('manage_user_import', () => {
         draft,
       });
       if (!draft) {
-        Notification.success(i18n('Created {0} users.', res.users.length));
-        await delay(2000);
-        window.location.reload();
+        if (res.url) window.location.href = res.url;
+        else if (res.error) throw new Error(res.error?.message || res.error);
+        else {
+          Notification.success(i18n('Created {0} users.', res.users.length));
+          await delay(2000);
+          window.location.reload();
+        }
       } else {
         $('[name="messages"]').text(res.messages.join('\n'));
       }

@@ -1,6 +1,6 @@
 # Hydro
 
-![GitHub Workflow Status](https://img.shields.io/github/workflow/status/hydro-dev/hydro/CI)
+![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/hydro-dev/hydro/build.yml?branch=master)
 ![hydrooj](https://img.shields.io/npm/dm/hydrooj)
 ![npm](https://img.shields.io/npm/v/hydrooj?label=hydrooj)
 ![node-current](https://img.shields.io/node/v/hydrooj)
@@ -18,23 +18,33 @@ Feel free to create an account and then navigate to `MyAccount > MyDomains > Cre
 
 [中文](https://hydro.js.org/)  
 
-[Open pre-configured test environment in Gitpod](https://gitpod.io/#https://github.com/hydro-dev/Hydro)  
+We are now looking for help with Korean and Japanese translation, if you are a native speaker of these languages, please contact us, pull requests are always welcome.
 
 ## Contact US
 
-QQ [3402182471](https://wpa.qq.com/msgrd?v=3&uin=3402182471&site=qq&menu=yes)  
+Email: i@undefined.moe  
 Hydro QQ User Group: 1085853538  
 Telegram Group [@hydrodev](https://t.me/hydrodev)
-Telegram [@webpack_exports_undefined](https://t.me/webpack_exports_undefined)  
+Telegram [@undefinedmoe](https://t.me/undefinedmoe)  
 
 ## License
 
-AGPL3
+The software is distributed under AGPLv3 with additional terms.
+
+Additional terms under AGPLv3 Section 7:
+
+1. You must not remove the copyright declaration displayed in the software. (Under [AGPLv3, 7(b)](LICENSE#L356))  
+2. When you distribute a modified version of the software, you must change the software name or the version number in a reasonable way in order to distinguish it from the original version. (Under [AGPLv3, 7(c)](LICENSE#360))
+3. Unless permitted, you are not allowed to use author's name, trademark or logo to promote the software. (Under [AGPLv3, 7(d)](LICENSE#L364))
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## Thanks to
 
 In dictionary order:
 
-- [Github](https://github.com/) Code hosting and workflow.  
+- [GitHub](https://github.com/) Code hosting and workflow.  
 - [criyle](https://github.com/criyle) Sandbox.  
 - [Vijos](https://github.com/vijos/vj4) UI framework.  

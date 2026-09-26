@@ -1,6 +1,8 @@
+/* eslint-disable no-lone-blocks */
+import $ from 'jquery';
 import _ from 'lodash';
 import moment from 'moment';
-import tpl from 'vj/utils/tpl';
+import { tpl } from 'vj/utils';
 
 export default class Calendar {
   constructor(events) {
@@ -207,13 +209,13 @@ export default class Calendar {
 
     const now = moment();
     days.forEach((day) => {
-      day.current = day.date.isSame(now, 'day'); // eslint-disable-line no-param-reassign
+      day.current = day.date.isSame(now, 'day');
     });
 
     const daysByWeek = _.chunk(days, 7);
 
     const numberOfWeeks = days.length / 7;
-    const bannersByWeek = _.fill(new Array(numberOfWeeks), 1).map(() => []);
+    const bannersByWeek = _.fill(Array.from({ length: numberOfWeeks }), 1).map(() => []);
     const beginDate = days[0].date.clone();
     const endDate = _.last(days).date.clone();
 
@@ -266,7 +268,7 @@ export default class Calendar {
         ]))
       .map((banners) => {
         const dayBitmap = _
-          .fill(new Array(7), 1)
+          .fill(Array.from({ length: 7 }), 1)
           .map(() => []);
         banners.forEach((banner) => {
           const beginDay = banner.beginAt.day();
@@ -279,10 +281,8 @@ export default class Calendar {
           for (; vIndex < vIndexMax; ++vIndex) {
             if (_.every(_
               .range(beginDay, endDay + 1)
-              .map((day) => !dayBitmap[day][vIndex]), // eslint-disable-line no-loop-func
-            )) { // eslint-disable-line function-paren-newline
-              break;
-            }
+              .map((day) => !dayBitmap[day][vIndex]), // eslint-disable-line
+            )) break;
           }
           // fill space
           for (let i = beginDay; i <= endDay; ++i) {
@@ -292,7 +292,7 @@ export default class Calendar {
         // merge adjacent cells and arrange banners by vertical index
         const vMaxLength = _.max(_.range(0, 7).map((day) => dayBitmap[day].length));
         const weekBanners = _
-          .fill(new Array(vMaxLength), 1)
+          .fill(Array.from({ length: vMaxLength }), 1)
           .map(() => []);
         for (let vIndex = 0; vIndex < vMaxLength; ++vIndex) {
           let last = { span: 1, banner: dayBitmap[0][vIndex] };
@@ -350,7 +350,7 @@ export default class Calendar {
               };
               banner.endAt = banner.event.maskFrom.clone().subtract(1, 'day');
               banner.endSnap = true;
-              bannerSpans[i].span -= newBannerSpan.span; // eslint-disable-line no-param-reassign
+              bannerSpans[i].span -= newBannerSpan.span;
               bannerSpans.splice(i + 1, 0, newBannerSpan);
               i++;
             }

@@ -1,3 +1,4 @@
+import $ from 'jquery';
 import { AutoloadPage } from 'vj/misc/Page';
 
 const katexPage = new AutoloadPage('katexPage', () => {
@@ -17,8 +18,8 @@ const katexPage = new AutoloadPage('katexPage', () => {
         ],
       }));
     }
-    runKatex($('.typo'));
-    $(document).on('vjContentNew', (e) => runKatex($(e.target).find('.typo')));
+    runKatex($('.richmedia'));
+    $(document).on('vjContentNew', (e) => runKatex($(e.target).find('.richmedia').addBack('.richmedia')));
   });
 });
 

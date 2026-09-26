@@ -1,8 +1,8 @@
-import { FilterQuery } from 'mongodb';
+import { Filter } from 'mongodb';
+import { Context } from '../context';
 import { TokenDoc } from '../interface';
-import * as bus from '../service/bus';
 import db from '../service/db';
-import { ArgMethod } from '../utils';
+import { ArgMethod, randomstring } from '../utils';
 
 class TokenModel {
     static coll = db.collection('token');
@@ -13,20 +13,32 @@ class TokenModel {
     static TYPE_LOSTPASS = 5;
     static TYPE_EXPORT = 6;
     static TYPE_IMPORT = 7;
+    static TYPE_WEBAUTHN = 8;
+    static TYPE_TEXTS = {
+        [TokenModel.TYPE_SESSION]: 'Session',
+        [TokenModel.TYPE_REGISTRATION]: 'Registration',
+        [TokenModel.TYPE_CHANGEMAIL]: 'Change Email',
+        [TokenModel.TYPE_OAUTH]: 'OAuth',
+        [TokenModel.TYPE_LOSTPASS]: 'Lost Password',
+        [TokenModel.TYPE_EXPORT]: 'Export',
+        [TokenModel.TYPE_IMPORT]: 'Import',
+        [TokenModel.TYPE_WEBAUTHN]: 'WebAuthn',
+    };
 
     static async add(
-        tokenType: number, expireSeconds: number, data: any, id = String.random(32),
+        tokenType: number, expireSeconds: number, data: any, id = randomstring(32),
     ): Promise<[string, TokenDoc]> {
         const now = new Date();
-        const res = await TokenModel.coll.insertOne({
+        const payload = {
             ...data,
             _id: id,
             tokenType,
             createAt: now,
             updateAt: now,
             expireAt: new Date(now.getTime() + expireSeconds * 1000),
-        });
-        return [id, res.ops[0]];
+        };
+        await TokenModel.coll.insertOne(payload);
+        return [id, payload];
     }
 
     @ArgMethod
@@ -34,7 +46,7 @@ class TokenModel {
         return await TokenModel.coll.findOne({ _id: tokenId, tokenType });
     }
 
-    static getMulti(tokenType: number, query: FilterQuery<TokenDoc> = {}) {
+    static getMulti(tokenType: number, query: Filter<TokenDoc> = {}) {
         return TokenModel.coll.find({ tokenType, ...query });
     }
 
@@ -55,7 +67,7 @@ class TokenModel {
             },
             { returnDocument: 'after' },
         );
-        return res.value;
+        return res;
     }
 
     @ArgMethod
@@ -82,20 +94,27 @@ class TokenModel {
     }
 
     @ArgMethod
-    static async getMostRecentSessionByUid(uid: number) {
-        return await TokenModel.coll.findOne({ uid, tokenType: TokenModel.TYPE_SESSION }, { sort: { updateAt: -1 } });
+    static async getMostRecentSessionByUid(uid: number, projection: string[]) {
+        return await TokenModel.coll.findOne(
+            { uid, tokenType: TokenModel.TYPE_SESSION },
+            { projection: { _id: 0, ...Object.fromEntries(projection.map((i) => [i, 1])) }, sort: { updateAt: -1 } },
+        );
     }
 
     @ArgMethod
-    static delByUid(uid: number) {
-        return TokenModel.coll.deleteMany({ uid });
+    static delByUid(uid: number, tokenType?: number) {
+        const filter: Filter<TokenDoc> = { uid };
+        if (tokenType !== undefined) filter.tokenType = tokenType;
+        return TokenModel.coll.deleteMany(filter);
     }
 }
 
-bus.once('app/started', () => db.ensureIndexes(
-    TokenModel.coll,
-    { key: { uid: 1, tokenType: 1, updateAt: -1 }, name: 'basic', sparse: true },
-    { key: { expireAt: -1 }, name: 'expire', expireAfterSeconds: 0 },
-));
+export async function apply(ctx: Context) {
+    await ctx.db.ensureIndexes(
+        TokenModel.coll,
+        { key: { uid: 1, tokenType: 1, updateAt: -1 }, name: 'basic', sparse: true },
+        { key: { expireAt: -1 }, name: 'expire', expireAfterSeconds: 0 },
+    );
+}
 export default TokenModel;
 global.Hydro.model.token = TokenModel;

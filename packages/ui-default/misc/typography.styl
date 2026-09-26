@@ -212,11 +212,11 @@ u, .typo-u
       display: none
 
 .supplementary.inverse
-  color: rgba($immersive-text-color, 0.8)
+  color: $immersive-text-color !important
 
   a
     &, &:visited, &:hover
-      color: rgba($immersive-text-color, 0.8)
+      color: $immersive-text-color !important
 
 .group-list__item
   margin-bottom: 1rem
@@ -261,6 +261,7 @@ small, figcaption
 
 .typo
   word-wrap()
+  overflow: auto hidden;
 
 .typo a, .typo .link, .typo-a
   &, &:visited, &:active, &:hover

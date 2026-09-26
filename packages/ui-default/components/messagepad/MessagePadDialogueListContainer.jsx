@@ -1,9 +1,7 @@
-import React from 'react';
 import _ from 'lodash';
+import React from 'react';
 import { connect } from 'react-redux';
-import 'jquery-scroll-lock';
-
-import i18n from 'vj/utils/i18n';
+import { i18n } from 'vj/utils';
 import ListItem from './DialogueListItemComponent';
 
 const mapStateToProps = (state) => ({
@@ -21,10 +19,6 @@ const mapDispatchToProps = (dispatch) => ({
 });
 
 export default connect(mapStateToProps, mapDispatchToProps)(class MessagePadDialogueListContainer extends React.PureComponent {
-  componentDidMount() {
-    $(this.refs.list).scrollLock({ strict: true });
-  }
-
   render() {
     const orderedDialogues = _.orderBy(
       _.values(this.props.dialogues),
@@ -34,16 +28,15 @@ export default connect(mapStateToProps, mapDispatchToProps)(class MessagePadDial
       'desc',
     );
     return (
-      <ol className="messagepad__list" ref="list">
+      <ol className="messagepad__list" style={{ overscrollBehavior: 'contain' }}>
         {_.map(orderedDialogues, (dialogue) => (
           <ListItem
             key={dialogue._id}
             userName={dialogue.udoc.uname}
-            // eslint-disable-next-line no-nested-ternary
-            summary={_.last(dialogue.messages)
-              ? (_.last(dialogue.messages).flag & 4)
+            summary={dialogue.messages.length
+              ? (_.maxBy(dialogue.messages, '_id').flag & 4)
                 ? i18n('[Richtext message]')
-                : _.last(dialogue.messages).content
+                : _.maxBy(dialogue.messages, '_id').content
               : ''}
             faceUrl={dialogue.udoc.avatarUrl}
             active={dialogue._id === this.props.activeId}

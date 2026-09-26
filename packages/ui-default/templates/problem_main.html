@@ -2,9 +2,6 @@
 {% import "components/problem.html" as problem with context %}
 {% extends "layout/basic.html" %}
 {% block content %}
-  {{ set(UiContext, {
-      currentCategory: category
-  }) }}
   <div class="row">
     <div class="medium-9 columns">
       <div class="section display-mode">
@@ -13,11 +10,18 @@
             <div class="search">
               <input name="q" type="text" value="{{ qs }}" placeholder="{{ _('Search') }}">
               {% include "partials/problem_stat.html" %}
+              <select name="sort" class="search-sort">
+                {%- for sortType in ["default", "recent"] -%}
+                  <option value="{{ sortType }}" {{ "selected" if sort == sortType else "" }}>{{ _('sort::' + sortType) }}</option>
+                {%- endfor -%}
+              </select>
               <button type="submit">
                 <span class="icon icon-search"></span>
               </button>
             </div>
           </form>
+        </div>
+        <div class="section__body no-padding">
           {% include "partials/problem_list.html" %}
         </div>
       </div>
@@ -34,6 +38,7 @@
               <span class="icon icon-edit"></span>
               {{ _('Leave Edit Mode') }}
             </a>
+            <div id="problem_selection" class="display-mode-hide"></div>
             {% if handler.user.hasPerm(perm.PERM_EDIT_PROBLEM) %}
               <a href="javascript:;" class="menu__link display-mode-hide" name="hide_selected_problems">
                 <span class="icon icon-close"></span>
@@ -65,16 +70,16 @@
             <h1 class="section__title">{{ _('Create Problem') }}</h1>
           </div>
           <ol class="menu">
-            {%- for item in ui.nodes.problem_add -%}
+            {%- for item in ui.getNodes('ProblemAdd') -%}
               <a href="{{ url(item.name, item.args) }}" class="menu__link">
-                <span class="icon icon-{{ item.icon|default('add') }}"></span>
-                {{ _(item.text) }}
+                <span class="icon icon-{{ item.args.icon|default('add') }}"></span>
+                {{ _(item.args.text) }}
               </a>
             {%- endfor -%}
           </ol>
           <div class="section__body">
             <div class="typo supplementary">
-              <p>{{ _('You have permissions to create problems for this domain.') }}</p>
+              <p>{{ _('You have permission to create problems for this domain.') }}</p>
             </div>
           </div>
         </div>

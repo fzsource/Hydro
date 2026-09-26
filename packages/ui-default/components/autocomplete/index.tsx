@@ -1,14 +1,14 @@
+import { AutoComplete as AutoCompleteFC } from '@hydrooj/components';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { assign } from 'lodash';
 import DOMAttachedObject from 'vj/components/DOMAttachedObject';
-import AutoCompleteFC from './components/AutoComplete';
 
 export interface AutoCompleteOptions<Multi extends boolean = boolean> {
   multi?: Multi;
   defaultItems?: string;
   width?: string;
   height?: string;
+  classes?: string;
   listStyle?: any;
   allowEmptyQuery?: boolean;
   freeSolo?: boolean;
@@ -19,22 +19,23 @@ export interface AutoCompleteOptions<Multi extends boolean = boolean> {
   text?: () => string;
 }
 
-export default class AutoComplete extends DOMAttachedObject {
+export default class AutoComplete<Options extends Record<string, any> = object, Multi extends boolean = boolean> extends DOMAttachedObject {
   static DOMAttachKey = 'ucwAutoCompleteInstance';
   ref = null;
   container = document.createElement('div');
-  options: AutoCompleteOptions;
+  options: AutoCompleteOptions<Multi> & Options;
+  component = ReactDOM.createRoot(this.container);
   changeListener = [
     (val) => this.$dom.val(val),
   ];
 
-  constructor($dom, options = {}) {
+  constructor($dom, options = {} as Options & { component?: React.ComponentType<any>, props?: Record<string, any> }) {
     super($dom);
     this.options = {
       items: async () => [],
       render: () => '',
       text: () => null,
-      multi: false,
+      multi: false as Multi,
       ...options,
     };
     this.clear = this.clear.bind(this);
@@ -63,20 +64,21 @@ export default class AutoComplete extends DOMAttachedObject {
   }
 
   attach() {
-    const value = this.$dom.val();
-    ReactDOM.createRoot(this.container).render(
-      <AutoCompleteFC
+    const Component = this.options.component || AutoCompleteFC;
+    const Wrapper = (props) => {
+      const [value, setValue] = React.useState(props.value);
+      return <Component
         ref={(ref) => { this.ref = ref; }}
+        onChange={(v) => {
+          setValue(v);
+          this.onChange(v);
+        }}
+        selectedKeys={(Array.isArray(value) ? value : value.split(',')).map((i) => i.trim()).filter((i) => i)}
         height="34px"
-        queryItems={this.options.items}
-        renderItem={this.options.render}
-        itemText={this.options.text}
-        selectedKeys={value.split(',').map((i) => i.trim())}
-        onChange={this.onChange}
-        multi={this.options.multi}
-        freeSolo={this.options.multi}
-      />,
-    );
+        {...this.options.props}
+      />;
+    };
+    this.component.render(<Wrapper value={this.$dom.val()} />);
   }
 
   open() {
@@ -89,15 +91,15 @@ export default class AutoComplete extends DOMAttachedObject {
     this.ref.closeList();
   }
 
-  value(): any {
-    if (this.options.multi) return this.$dom.val();
+  value(): Multi extends true ? (string | number)[] : string {
+    if (this.options.multi) return this.ref?.getSelectedItemKeys() ?? this.$dom.val();
     return this.ref?.getSelectedItems()[0] ?? null;
   }
 
   detach() {
     if (this.detached) return;
     super.detach();
-    ReactDOM.unmountComponentAtNode(this.container);
+    this.component.unmount();
     this.$dom.removeClass('autocomplete-dummy');
     this.container.parentNode.removeChild(this.container);
   }
@@ -106,6 +108,3 @@ export default class AutoComplete extends DOMAttachedObject {
     this.ref.focus();
   }
 }
-
-assign(AutoComplete, DOMAttachedObject);
-window.Hydro.components.autocomplete = AutoComplete;

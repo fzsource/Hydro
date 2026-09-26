@@ -1,18 +1,19 @@
+/* eslint-disable react-refresh/only-export-components */
 import 'jquery.easing';
 
+import { MantineProvider, Popover } from '@mantine/core';
+import $ from 'jquery';
+import { chunk } from 'lodash';
 import * as React from 'react';
 import ReactDOM from 'react-dom/client';
-import { Popover } from '@blueprintjs/core';
 import { AutoloadPage } from 'vj/misc/Page';
+import { request } from 'vj/utils';
 
-import request from 'vj/utils/request';
-import { chunk } from 'lodash';
-
-function renderReactions(reactions, self, rootEle) {
+function renderReactions(reactions = {}, self = {}, rootEle) {
   let html = '';
-  for (const key in reactions) {
-    if (!reactions[key]) continue;
-    html += `<div class="reaction${self[key] ? ' active' : ''}""><span class="emoji">${key}</span> ${reactions[key]}</div>\n`;
+  for (const [k, v] of Object.entries(reactions).sort(([, v1], [, v2]) => +v2 - +v1)) {
+    if (!v) continue;
+    html += `<div class="reaction${self[k] ? ' active' : ''}""><span class="emoji">${k}</span> ${v}</div>\n`;
   }
   rootEle.html(html);
 }
@@ -32,23 +33,33 @@ function getRow(count) {
 }
 
 function Reaction({ payload, ele }) {
-  const emojiList: string[] = (UiContext.emojiList || '👍 👎 😄 😕 ❤️ 🤔 🤣 🌿 🍋 🕊️ 👀 🤣').split(' ');
+  const emojiList: string[] = (UiContext.emojiList || '👍 👎 😄 😕 ❤️ 🤔 🤣 🌿 🍋 🕊️ 👀 🤡').split(' ');
   const elesPerRow = getRow(Math.sqrt(emojiList.length));
   const [focus, updateFocus] = React.useState(false);
-  const [finish, updateFinish] = React.useState(false);
-  if (finish) setTimeout(() => updateFinish(false), 1000);
+  const [open, updateOpen] = React.useState(false);
+  const [trigger, updateTrigger] = React.useState(false);
   return (
-    // eslint-disable-next-line no-nested-ternary
-    <Popover usePortal interactionKind="hover" isOpen={finish ? false : (focus ? true : undefined)}>
-      <span className="icon icon-emoji"></span>
-      <div>
+    <Popover opened={trigger || open || focus}>
+      <Popover.Target>
+        <span
+          className="icon icon-emoji"
+          onMouseEnter={() => updateTrigger(true)}
+          onMouseLeave={() => {
+            setTimeout(() => updateTrigger(false), 300);
+          }}
+        />
+      </Popover.Target>
+      <Popover.Dropdown onMouseEnter={() => updateOpen(true)} onMouseLeave={() => updateOpen(false)}>
         {chunk(emojiList, elesPerRow).map((line, i) => (
           <div className="row" key={+i} style={{ paddingBottom: 4, paddingTop: 4 }}>
             {line.map((emoji) => (
               <div
                 key={emoji}
                 className={`medium-${12 / elesPerRow} small-${12 / elesPerRow} columns popover-reaction-item`}
-                onClick={() => handleEmojiClick(payload, emoji, ele).then(() => updateFinish(true))}
+                onClick={() => handleEmojiClick(payload, emoji, ele).then(() => {
+                  updateOpen(false);
+                  updateTrigger(false);
+                })}
               >
                 {emoji}
               </div>
@@ -60,7 +71,7 @@ function Reaction({ payload, ele }) {
             <input name="emojiSuggest" onFocus={() => updateFocus(true)} onBlur={() => updateFocus(false)}></input>
           </div>
         </div>
-      </div>
+      </Popover.Dropdown>
     </Popover>
   );
 }
@@ -68,9 +79,9 @@ function Reaction({ payload, ele }) {
 const reactionPage = new AutoloadPage('reactionPage', () => {
   const canUseReaction = $('[data-op="react"]').length > 0;
   $('[data-op="react"]').each((i, e) => {
-    ReactDOM.createRoot(e).render(
-      <Reaction payload={$(e).data('form')} ele={$(`.reactions[data-${$(e).data('form').type}='${$(e).data('form').id}']`)} />,
-    );
+    ReactDOM.createRoot(e).render(<MantineProvider>
+      <Reaction payload={$(e).data('form')} ele={$(`.reactions[data-${$(e).data('form').nodeType}='${$(e).data('form').id}']`)} />
+    </MantineProvider>);
   });
   $(document).on('click', '.reaction', async (e) => {
     if (!canUseReaction) {
@@ -80,7 +91,7 @@ const reactionPage = new AutoloadPage('reactionPage', () => {
     const target = $(e.currentTarget);
     const res = await request.post('', {
       operation: 'reaction',
-      type: target.parent().data('type'),
+      nodeType: target.parent().data('type'),
       id: target.parent().data(target.parent().data('type')),
       emoji: target.text().trim().split(' ')[0],
       reverse: target.hasClass('active'),

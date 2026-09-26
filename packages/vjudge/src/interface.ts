@@ -1,3 +1,5 @@
+import { JudgeResultBody, LangConfig } from '@hydrooj/common';
+
 export interface RemoteAccount {
     _id: string;
     type: string;
@@ -8,32 +10,43 @@ export interface RemoteAccount {
     proxy?: string;
     query?: string;
     frozen?: string;
+    problemLists?: string[];
+    enableOn?: string[];
+    UA?: string;
 }
-declare module 'hydrooj/src/interface' {
+export interface VjudgeMount {
+    _id: string; //  domainId, or `${domainId}.${namespace}`
+    mount: string;
+    syncDone: Record<string, number>;
+}
+declare module 'hydrooj' {
     interface Collections {
         vjudge: RemoteAccount;
-    }
-
-    interface DomainDoc {
-        mount?: string;
-        mountInfo?: any;
+        'vjudge.mount': VjudgeMount;
     }
 }
+type NextFunction = (body: Partial<JudgeResultBody>) => void;
 export interface IBasicProvider {
-    ensureLogin(): Promise<boolean | string>;
-    getProblem(id: string): Promise<{
+    ensureLogin: () => Promise<boolean | string>;
+    getProblem: (id: string, meta: Record<string, any>) => Promise<{
         title: string;
         data: Record<string, any>;
         files: Record<string, any>;
         tag: string[];
         content: string;
         difficulty?: number;
+        solution?: string;
     }>;
-    listProblem(page: number, resync: boolean): Promise<string[]>;
-    submitProblem(id: string, lang: string, code: string, info: any, next: any, end: any): Promise<string>;
-    waitForSubmission(id: string, next: any, end: any): Promise<void>;
+    entryProblemLists?: string[];
+    listProblem: (page: number, resyncFrom: number, listId: string) => Promise<string[]>;
+    submitProblem: (id: string, lang: string, code: string, info: any, next: NextFunction, end: NextFunction) => Promise<string | void>;
+    waitForSubmission: (id: string, next: NextFunction, end: NextFunction) => Promise<void>;
+    checkStatus?: (onCheckFunc: boolean) => Promise<void>;
+    stop?: () => Promise<void>;
 }
 
 export interface BasicProvider {
-    new(account: RemoteAccount, save: (data: any) => Promise<void>): IBasicProvider
+    new(account: RemoteAccount, save: (data: any) => Promise<void>): IBasicProvider;
+    Langs?: Record<string, Partial<LangConfig>>;
+    noComment?: boolean;
 }

@@ -1,23 +1,37 @@
-import queueMicrotask from 'queue-microtask';
-import browserUpdate from 'browser-update';
+import 'core-js/stable';
 import 'matchmedia-polyfill';
 
-window.queueMicrotask = queueMicrotask;
+import browserUpdate from 'browser-update';
+
 browserUpdate({
   required: {
     e: -10, f: -10, o: -3, s: -1, c: -10,
   },
   insecure: true,
   api: 2022.03,
+  url: 'https://google.cn/chrome/',
+  jsshowurl: '/browser-update.js',
 });
 
 // monaco-editor requires this polyfill
-if (window.MediaQueryList) {
+if (window.MediaQueryList && !MediaQueryList.prototype.addEventListener) {
   MediaQueryList.prototype.addEventListener = (k, listener) => {
     MediaQueryList.prototype.addListener(listener);
   };
 }
-if (!(window.matchMedia('all').addListener || window.matchMedia('all').addEventListener)) {
+if (typeof window['WeakRef'] === 'undefined') {
+  // @ts-ignore
+  window.WeakRef = (function (wm) {
+    function WeakRef(target) {
+      wm.set(this, target);
+    }
+    WeakRef.prototype.deref = function () {
+      return wm.get(this);
+    };
+    return WeakRef;
+  }(new WeakMap()));
+}
+if (!window.matchMedia('all').addListener && !window.matchMedia('all').addEventListener) {
   const localMatchMedia = window.matchMedia;
   const hasMediaQueries = localMatchMedia('only all').matches;
   let isListening = false;
@@ -62,6 +76,7 @@ if (!(window.matchMedia('all').addListener || window.matchMedia('all').addEventL
         for (let i = 0, il = listeners.length; i < il; i++) {
           if (listeners[i] === listener) {
             listeners.splice(i, 1);
+            i--;
           }
         }
       };

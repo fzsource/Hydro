@@ -1,205 +1,82 @@
-/* eslint-disable import/no-dynamic-require */
 /* eslint-disable no-await-in-loop */
-/* eslint-disable no-eval */
-import os from 'os';
+import '../lib/index';
+
 import path from 'path';
 import fs from 'fs-extra';
-import yaml from 'js-yaml';
-import i18n from '../lib/i18n';
+import * as yaml from 'js-yaml';
+import { Context } from '../context';
 import { Logger } from '../logger';
-import * as bus from '../service/bus';
+import { PRIV } from '../model/builtin';
+import { isClass, unwrapExports } from '../utils';
 
 const logger = new Logger('common');
 
-function getFiles(folder: string, base = ''): string[] {
-    const files = [];
-    const f = fs.readdirSync(folder);
-    for (const i of f) {
-        if (fs.statSync(path.join(folder, i)).isDirectory()) {
-            files.push(...getFiles(path.join(folder, i), path.join(base, i)));
-        } else files.push(path.join(base, i));
+function locateFile(basePath: string, filenames: string[]) {
+    for (const i of filenames) {
+        const p = path.resolve(basePath, i);
+        if (fs.existsSync(p)) return p;
     }
-    return files.map((item) => item.replace(/\\/gmi, '/'));
+    return null;
 }
 
-export async function handler(pending: string[], fail: string[]) {
-    for (const i of pending) {
-        let p = path.resolve(i, 'handler.ts');
-        if (!fs.existsSync(p)) p = path.resolve(i, 'handler.js');
-        if (fs.existsSync(p) && !fail.includes(i)) {
+type LoadTask = 'model' | 'addon' | 'service';
+const getLoader = (type: LoadTask, filename: string) => async function loader(pending: Record<string, string>, fail: string[], ctx: Context) {
+    for (const [name, i] of Object.entries(pending)) {
+        const p = locateFile(i, [`${filename}.ts`, `${filename}.js`]);
+        if (p && !fail.includes(i)) {
+            const loadType = type.replace(/^(.)/, (t) => t.toUpperCase());
             try {
-                logger.info('Handler init: %s', i);
-                require(p);
+                const m = unwrapExports(require(p));
+                if (m.apply) ctx.loader.reloadPlugin(p, name);
+                else logger.info(`${loadType} init: %s`, i);
             } catch (e) {
                 fail.push(i);
-                logger.error('Handler Load Fail: %s', i);
+                app.injectUI(
+                    'Notification', `${loadType} load fail: {0}`,
+                    { args: [i], type: 'warn' }, PRIV.PRIV_VIEW_SYSTEM_NOTIFICATION,
+                );
+                logger.info(`${loadType} load fail: %s`, i);
                 logger.error(e);
             }
         }
     }
-    await bus.serial('app/load/handler');
+};
+
+export const addon = getLoader('addon', 'index');
+export const model = getLoader('model', 'model');
+export const service = getLoader('service', 'service');
+
+export async function builtinModel(ctx: Context) {
+    const modelDir = path.resolve(__dirname, '..', 'model');
+    const models = await fs.readdir(modelDir);
+    for (const t of models.filter((i) => i.endsWith('.ts'))) {
+        const q = path.resolve(modelDir, t);
+        const module = require(q);
+        if ('apply' in module) ctx.loader.reloadPlugin(q, '');
+        const exports = unwrapExports(module);
+        if (isClass(exports) && !(Symbol.for('hydro.initialize') in exports)) ctx.loader.reloadPlugin(q, '');
+    }
 }
 
-export async function locale(pending: string[], fail: string[]) {
-    for (const i of pending) {
-        let p = path.resolve(i, 'locales');
-        if (!fs.existsSync(p)) p = path.resolve(i, 'locale');
-        if (fs.existsSync(p) && fs.statSync(p).isDirectory() && !fail.includes(i)) {
+export async function locale(pending: Record<string, string>, fail: string[]) {
+    for (const i of Object.values(pending)) {
+        const p = locateFile(i, ['locale', 'locales']);
+        if (p && (await fs.stat(p)).isDirectory() && !fail.includes(i)) {
             try {
-                const files = fs.readdirSync(p);
-                const locales = {};
+                const files = await fs.readdir(p);
                 for (const file of files) {
-                    const content = fs.readFileSync(path.resolve(p, file)).toString();
-                    locales[file.split('.')[0]] = yaml.load(content);
+                    const content = await fs.readFile(path.resolve(p, file), 'utf-8');
+                    const dict = yaml.load(content);
+                    if (typeof dict !== 'object' || !dict) throw new Error('Invalid locale file');
+                    app.i18n.load(file.split('.')[0], dict as any);
                 }
-                i18n(locales);
                 logger.info('Locale init: %s', i);
             } catch (e) {
                 fail.push(i);
+                app.injectUI('Notification', 'Locale load fail: {0}', { args: [i], type: 'warn' }, PRIV.PRIV_VIEW_SYSTEM_NOTIFICATION);
                 logger.error('Locale Load Fail: %s', i);
                 logger.error(e);
             }
         }
     }
-    await bus.serial('app/load/locale');
-}
-
-export async function setting(pending: string[], fail: string[], modelSetting: typeof import('../model/setting')) {
-    const map = {
-        system: modelSetting.SystemSetting,
-        account: modelSetting.AccountSetting,
-        preference: modelSetting.PreferenceSetting,
-        domain: modelSetting.DomainSetting,
-    };
-    for (const i of pending) {
-        let p = path.resolve(i, 'setting.yaml');
-        const t = i.split(path.sep);
-        const name = t[t.length - 1];
-        if (!fs.existsSync(p)) p = path.resolve(i, 'settings.yaml');
-        if (fs.existsSync(p) && !fail.includes(i)) {
-            try {
-                const cfg: any = yaml.load(fs.readFileSync(p, 'utf-8'));
-                for (const key in cfg) {
-                    let val = cfg[key].default || cfg[key].value;
-                    if (typeof val === 'string') {
-                        val = val
-                            .replace(/\$TEMP/g, os.tmpdir())
-                            .replace(/\$HOME/g, os.homedir());
-                    }
-                    const category = cfg[key].category || 'system';
-                    map[category](
-                        modelSetting.Setting(
-                            cfg[key].family || name, category === 'system' ? `${name}.${key}` : key, val, cfg[key].type || 'text',
-                            cfg[key].name || key, cfg[key].desc || '',
-                        ),
-                    );
-                }
-                logger.info('Config load: %s', i);
-            } catch (e) {
-                logger.error('Config Load Fail: %s', i);
-                logger.error(e);
-            }
-        }
-    }
-    await bus.serial('app/load/setting');
-}
-
-export async function template(pending: string[], fail: string[]) {
-    for (const i of pending) {
-        let p = path.resolve(i, 'templates');
-        if (!fs.existsSync(p)) p = path.resolve(i, 'template');
-        if (fs.existsSync(p) && fs.statSync(p).isDirectory() && !fail.includes(i)) {
-            try {
-                const files = getFiles(p);
-                for (const file of files) {
-                    if (file.endsWith('.tsx')) global.Hydro.ui.template[file] = require(path.resolve(p, file));
-                    global.Hydro.ui.template[file] = await fs.readFile(path.resolve(p, file), 'utf-8');
-                }
-                logger.info('Template init: %s', i);
-            } catch (e) {
-                fail.push(i);
-                logger.error('Template Load Fail: %s', i);
-                logger.error(e);
-            }
-        }
-    }
-    await bus.serial('app/load/template');
-}
-
-export async function model(pending: string[], fail: string[]) {
-    for (const i of pending) {
-        let p = path.resolve(i, 'model.ts');
-        if (!fs.existsSync(p)) p = path.resolve(i, 'model.js');
-        if (fs.existsSync(p) && !fail.includes(i)) {
-            try {
-                logger.info('Model init: %s', i);
-                require(p);
-            } catch (e) {
-                fail.push(i);
-                logger.error('Model Load Fail: %s', i);
-                logger.error(e);
-            }
-        }
-    }
-    await bus.serial('app/load/model');
-}
-
-export async function lib(pending: string[], fail: string[]) {
-    for (const i of pending) {
-        let p = path.resolve(i, 'lib.ts');
-        if (!fs.existsSync(p)) p = path.resolve(i, 'lib.js');
-        if (fs.existsSync(p) && !fail.includes(i)) {
-            try {
-                logger.info('Lib init: %s', i);
-                require(p);
-            } catch (e) {
-                fail.push(i);
-                logger.error('Lib Load Fail: %s', i);
-                logger.error(e);
-            }
-        }
-    }
-    await bus.serial('app/load/lib');
-}
-
-export async function service(pending: string[], fail: string[]) {
-    for (const i of pending) {
-        let p = path.resolve(i, 'service.ts');
-        if (!fs.existsSync(p)) p = path.resolve(i, 'service.js');
-        if (fs.existsSync(p) && !fail.includes(i)) {
-            try {
-                logger.info('Service init: %s', i);
-                require(p);
-            } catch (e) {
-                fail.push(i);
-                logger.error('Service Load Fail: %s', i);
-                logger.error(e);
-            }
-        }
-    }
-    for (const key in global.Hydro.service) {
-        if (key === 'server') continue;
-        const srv = global.Hydro.service[key];
-        if (!srv.started && srv.start) await srv.start();
-    }
-    await bus.serial('app/load/service');
-}
-
-export async function script(pending: string[], fail: string[], active: string[]) {
-    for (const i of pending) {
-        let p = path.resolve(i, 'script.ts');
-        if (!fs.existsSync(p)) p = path.resolve(i, 'script.js');
-        if (await fs.pathExists(p) && !fail.includes(i)) {
-            try {
-                logger.info('Script init: %s', i);
-                require(p);
-            } catch (e) {
-                fail.push(i);
-                logger.error('Script Load Fail: %s', i);
-                logger.error(e);
-            }
-        }
-        active.push(i);
-    }
-    await bus.serial('app/load/script');
 }

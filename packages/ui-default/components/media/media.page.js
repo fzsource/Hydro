@@ -1,5 +1,6 @@
+import $ from 'jquery';
 import { AutoloadPage } from 'vj/misc/Page';
-import request from 'vj/utils/request';
+import { request } from 'vj/utils';
 
 export default new AutoloadPage('media', async () => {
   async function parseMedia($dom = $(document.body)) {
@@ -11,7 +12,7 @@ export default new AutoloadPage('media', async () => {
       resolvers.push((html) => html && $(ele).replaceWith($(html)));
     };
     users.get().forEach((ele) => resolve(ele, { type: 'user', id: +$(ele).text() }));
-    $dom.find('.typo').get().forEach((el) => {
+    $dom.find('.typo').addBack('.typo').get().forEach((el) => {
       if (el.className.includes('no-media')) return;
       $(el).find('a[href]').get().forEach((ele) => {
         if ($(ele).parent().hasClass('user-profile-link')) return;
@@ -32,6 +33,7 @@ export default new AutoloadPage('media', async () => {
         if (category === 'user' && Number.isInteger(+data) && !extra) resolve(ele, { type: 'user', id: +data });
         if (category === 'p' && !extra) resolve(ele, { type: 'problem', id: data, domainId });
         if (category === 'contest' && !extra) resolve(ele, { type: 'contest', id: data, domainId });
+        if (category === 'homework' && !extra) resolve(ele, { type: 'homework', id: data, domainId });
       });
     });
     if (!items.length) return;

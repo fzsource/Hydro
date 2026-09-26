@@ -1,30 +1,24 @@
 import { exec } from 'child_process';
 import { inspect } from 'util';
-import Ajv from 'ajv';
 import * as yaml from 'js-yaml';
-import * as check from '../check';
-import { BadRequestError, ValidationError } from '../error';
+import { omit } from 'lodash';
+import Schema from 'schemastery';
 import {
-    isEmail, isPassword, isUname, validate,
-} from '../lib/validator';
+    CannotEditSuperAdminError, NotLaunchedByPM2Error, UserNotFoundError, ValidationError,
+} from '../error';
 import { Logger } from '../logger';
 import { PRIV, STATUS } from '../model/builtin';
 import domain from '../model/domain';
 import record from '../model/record';
 import * as setting from '../model/setting';
-import * as system from '../model/system';
+import system from '../model/system';
 import user from '../model/user';
-import * as bus from '../service/bus';
 import {
-    Connection, ConnectionHandler, Handler,
-    param, Route, Types,
+    ConnectionHandler, Handler, param, requireSudo, Types,
 } from '../service/server';
-import { schema } from '../settings';
-import * as judge from './judge';
+import { JudgeResultCallbackContext } from './judge';
 
 const logger = new Logger('manage');
-const ajv = new Ajv({ useDefaults: true });
-const validator = ajv.compile<any>(schema);
 
 function set(key: string, value: any) {
     if (setting.SYSTEM_SETTINGS_BY_KEY[key]) {
@@ -75,11 +69,11 @@ class SystemCheckConnHandler extends ConnectionHandler {
         const log = (payload: any) => this.send({ type: 'log', payload });
         const warn = (payload: any) => this.send({ type: 'warn', payload });
         const error = (payload: any) => this.send({ type: 'error', payload });
-        await check.start(this, log, warn, error, (id) => { this.id = id; });
+        await this.ctx.check.run(this, log, warn, error, (id) => { this.id = id; });
     }
 
     async cleanup() {
-        check.cancel(this.id);
+        this.ctx.check.cancel(this.id);
     }
 }
 
@@ -89,52 +83,48 @@ class SystemDashboardHandler extends SystemHandler {
     }
 
     async postRestart() {
-        if (!process.env.pm_cwd) throw new BadRequestError('Not launched by pm2');
+        if (!process.env.pm_cwd) throw new NotLaunchedByPM2Error();
         exec(`pm2 reload "${process.env.name}"`);
         this.back();
     }
 }
 
 class SystemScriptHandler extends SystemHandler {
+    @requireSudo
     async get() {
         this.response.template = 'manage_script.html';
         this.response.body.scripts = global.Hydro.script;
     }
 
+    @requireSudo
     @param('id', Types.Name)
     @param('args', Types.Content, true)
     async post(domainId: string, id: string, raw = '{}') {
         if (!global.Hydro.script[id]) throw new ValidationError('id');
-        const args = JSON.parse(raw);
-        validate(global.Hydro.script[id].validate, args);
-        const rid = await record.add(domainId, -1, this.user._id, '-', id, false, raw);
-        const report = (data) => judge.next({ domainId, rid, ...data });
-        report({ message: `Running script: ${id} `, status: STATUS.STATUS_JUDGING });
-        const start = new Date().getTime();
+        let args = JSON.parse(raw);
+        if (typeof global.Hydro.script[id].validate === 'function') {
+            args = global.Hydro.script[id].validate(args);
+        }
+        const rid = await record.add(domainId, -1, this.user._id, '-', id, false, { input: [raw], type: 'pretest' });
+        const c = new JudgeResultCallbackContext(this.ctx, { type: 'judge', domainId, rid });
+        c.next({ message: `Running script: ${id} `, status: STATUS.STATUS_JUDGING });
+        const start = Date.now();
         // Maybe async?
-        global.Hydro.script[id].run(args, report)
-            .then((ret: any) => {
-                const time = new Date().getTime() - start;
-                judge.end({
-                    domainId,
-                    rid,
-                    status: STATUS.STATUS_ACCEPTED,
-                    message: inspect(ret, false, 10, true),
-                    judger: 1,
-                    time,
-                    memory: 0,
-                });
-            })
+        global.Hydro.script[id].run(args, (data) => c.next(data))
+            .then((ret: any) => c.end({
+                status: STATUS.STATUS_ACCEPTED,
+                message: inspect(ret, false, 10, true),
+                judger: 1,
+                time: Date.now() - start,
+                memory: 0,
+            }))
             .catch((err: Error) => {
-                const time = new Date().getTime() - start;
                 logger.error(err);
-                judge.end({
-                    domainId,
-                    rid,
+                c.end({
                     status: STATUS.STATUS_SYSTEM_ERROR,
                     message: `${err.message} \n${(err as any).params || []} \n${err.stack} `,
                     judger: 1,
-                    time,
+                    time: Date.now() - start,
                     memory: 0,
                 });
             });
@@ -144,6 +134,7 @@ class SystemScriptHandler extends SystemHandler {
 }
 
 class SystemSettingHandler extends SystemHandler {
+    @requireSudo
     async get() {
         this.response.template = 'manage_setting.html';
         this.response.body.current = {};
@@ -151,55 +142,13 @@ class SystemSettingHandler extends SystemHandler {
         for (const s of this.response.body.settings) {
             this.response.body.current[s.key] = system.get(s.key);
         }
-        const hide = [];
-        const raw = system.get('_') || '';
-        let config = yaml.load(raw);
-        const valid = validator(config);
-        if (!(raw.trim() && valid)) {
-            const data = {};
-            for (const key in schema.properties) {
-                data[key] = {};
-                for (const subkey in (schema.definitions[key] as any).properties || {}) {
-                    if (system.get(`${key}.${subkey}`)) {
-                        data[key][subkey] = system.get(`${key}.${subkey}`);
-                        if ((schema.definitions[key] as any).properties[subkey]?.writeOnly) {
-                            if (data[key][subkey] instanceof Array) {
-                                hide.push(...data[key][subkey]);
-                            } else hide.push(data[key][subkey]);
-                        }
-                    }
-                }
-            }
-            validator(data);
-            config = yaml.dump(data);
-        } else config = yaml.dump(config);
-        this.response.body.hide = hide;
-        this.response.body.config = config;
     }
 
+    @requireSudo
     async post(args: any) {
         const tasks = [];
         const booleanKeys = args.booleanKeys || {};
         delete args.booleanKeys;
-        if (args._) {
-            if (typeof args._ !== 'string') throw new ValidationError('config');
-            try {
-                const payload = yaml.load(args._);
-                const valid = validator(payload);
-                if (!valid) {
-                    throw new ValidationError('config', null, validator.errors[0]);
-                }
-                for (const key in payload) {
-                    for (const subkey in payload[key]) {
-                        tasks.push(system.set(`${key}.${subkey}`, payload[key][subkey]));
-                    }
-                }
-            } catch (e) {
-                throw new ValidationError('config', null, e.message);
-            }
-            await system.set('_', args._);
-            delete args._;
-        }
         for (const key in args) {
             if (typeof args[key] === 'object') {
                 for (const subkey in args[key]) {
@@ -213,23 +162,78 @@ class SystemSettingHandler extends SystemHandler {
         for (const key in booleanKeys) {
             if (typeof booleanKeys[key] === 'object') {
                 for (const subkey in booleanKeys[key]) {
-                    if (!args[key][subkey]) tasks.push(system.set(`${key}.${subkey}`, false));
+                    if (!args[key]?.[subkey]) tasks.push(system.set(`${key}.${subkey}`, false));
                 }
             }
         }
-        tasks.push(bus.parallel('system/setting', args));
         await Promise.all(tasks);
+        this.ctx.broadcast('system/setting', args);
         this.back();
     }
 }
 
-class SystemSettingSchemaHandler extends SystemHandler {
+class SystemConfigHandler extends SystemHandler {
+    @requireSudo
     async get() {
-        this.response.body = JSON.stringify(schema);
-        this.response.type = 'application/json';
+        this.response.template = 'manage_config.html';
+        let value = this.ctx.setting.configSource;
+
+        const processNode = (node: any, schema: Schema<any, any>, parent?: any, accessKey?: string) => {
+            if (!node) return;
+            if (['union', 'intersect'].includes(schema.type)) {
+                for (const item of schema.list) processNode(node, item, parent, accessKey);
+            }
+            if (parent && (schema.meta.secret === true || schema.meta.role === 'secret')) {
+                if (schema.type === 'string') parent[accessKey] = '[hidden]';
+                // TODO support more types
+            }
+            if (schema.type === 'object') {
+                for (const key in schema.dict) processNode(node[key], schema.dict[key], node, key);
+            }
+        };
+
+        try {
+            const temp = yaml.load(this.ctx.setting.configSource);
+            for (const schema of this.ctx.setting.settings) processNode(temp, schema);
+            value = yaml.dump(temp);
+        } catch (e) {
+            logger.error('Failed to process config', e.message);
+        }
+        this.response.body = {
+            schema: Schema.intersect(this.ctx.setting.settings).toJSON(),
+            value,
+        };
+    }
+
+    @requireSudo
+    @param('value', Types.String)
+    async post({ }, value: string) {
+        const oldConfig = yaml.load(this.ctx.setting.configSource);
+        let config;
+        const processNode = (node: any, old: any, schema: Schema<any, any>, parent?: any, accessKey?: string) => {
+            if (['union', 'intersect'].includes(schema.type)) {
+                for (const item of schema.list) processNode(node, old, item, parent, accessKey);
+            }
+            if (parent && (schema.meta.secret === true || schema.meta.role === 'secret')) {
+                if (node === '[hidden]') parent[accessKey] = old;
+                // TODO support more types
+            }
+            if (schema.type === 'object') {
+                for (const key in schema.dict) processNode(node[key] || {}, old[key] || {}, schema.dict[key], node, key);
+            }
+        };
+
+        try {
+            config = yaml.load(value);
+            for (const schema of this.ctx.setting.settings) processNode(config, oldConfig, schema, null, '');
+        } catch (e) {
+            throw new ValidationError('value', '', e.message);
+        }
+        await this.ctx.setting.saveConfig(config);
     }
 }
 
+/* eslint-disable no-await-in-loop */
 class SystemUserImportHandler extends SystemHandler {
     async get() {
         this.response.body.users = [];
@@ -240,58 +244,121 @@ class SystemUserImportHandler extends SystemHandler {
     @param('draft', Types.Boolean)
     async post(domainId: string, _users: string, draft: boolean) {
         const users = _users.split('\n');
-        const udocs = [];
+        const udocs: { email: string, username: string, password: string, displayName?: string, [key: string]: any }[] = [];
         const messages = [];
+        const mapping = Object.create(null);
+        const groups: Record<string, string[]> = Object.create(null);
         for (const i in users) {
             const u = users[i];
             if (!u.trim()) continue;
-            let [email, username, password, displayName] = u.split(',').map((t) => t.trim());
-            if (!email || !username || !password) [email, username, password, displayName] = u.split('\t').map((t) => t.trim());
+            let [email, username, password, displayName, extra] = u.split('\t').map((t) => t.trim());
+            if (!email || !username || !password) {
+                const data = u.split(',').map((t) => t.trim());
+                [email, username, password, displayName, extra] = data;
+                if (data.length > 5) extra = data.slice(4).join(',');
+            }
             if (email && username && password) {
-                if (!isEmail(email)) messages.push(`Line ${+i + 1}: Invalid email.`);
-                else if (!isUname(username)) messages.push(`Line ${+i + 1}: Invalid username`);
-                else if (!isPassword(password)) messages.push(`Line ${+i + 1}: Invalid password`);
-                // eslint-disable-next-line no-await-in-loop
-                else if (await user.getByEmail('system', email)) {
+                if (!Types.Email[1](email)) messages.push(`Line ${+i + 1}: Invalid email.`);
+                else if (!Types.Username[1](username)) messages.push(`Line ${+i + 1}: Invalid username`);
+                else if (!Types.Password[1](password)) messages.push(`Line ${+i + 1}: Invalid password`);
+                else if (udocs.find((t) => t.email === email) || await user.getByEmail('system', email)) {
                     messages.push(`Line ${+i + 1}: Email ${email} already exists.`);
-                    // eslint-disable-next-line no-await-in-loop
-                } else if (await user.getByUname('system', username)) {
+                } else if (udocs.find((t) => t.username === username) || await user.getByUname('system', username)) {
                     messages.push(`Line ${+i + 1}: Username ${username} already exists.`);
                 } else {
-                    udocs.push({
+                    const payload: any = {};
+                    try {
+                        const data = JSON.parse(extra);
+                        if (data.group) {
+                            groups[data.group] ||= [];
+                            groups[data.group].push(email);
+                        }
+                        Object.assign(payload, data);
+                    } catch (e) { }
+                    Object.assign(payload, {
                         email, username, password, displayName,
                     });
+                    await this.ctx.serial('user/import/parse', payload, messages);
+                    udocs.push(payload);
                 }
             } else messages.push(`Line ${+i + 1}: Input invalid.`);
         }
         messages.push(`${udocs.length} users found.`);
         if (!draft) {
-            for (const {
-                email, username, password, displayName,
-            } of udocs) {
+            for (const udoc of udocs) {
                 try {
-                    // eslint-disable-next-line no-await-in-loop
-                    const uid = await user.create(email, username, password);
-                    // eslint-disable-next-line no-await-in-loop
-                    if (displayName) await domain.setUserInDomain(domainId, uid, { displayName });
+                    const uid = await user.create(udoc.email, udoc.username, udoc.password);
+                    mapping[udoc.email] = uid;
+                    if (udoc.displayName) await domain.setUserInDomain(domainId, uid, { displayName: udoc.displayName });
+                    if (udoc.school) await user.setById(uid, { school: udoc.school });
+                    if (udoc.studentId) await user.setById(uid, { studentId: udoc.studentId });
+                    await this.ctx.serial('user/import/create', uid, udoc);
                 } catch (e) {
                     messages.push(e.message);
                 }
+            }
+            const existing = await user.listGroup(domainId);
+            for (const name in groups) {
+                const uids = groups[name].map((i) => mapping[i]).filter((i) => i);
+                const current = existing.find((i) => i.name === name)?.uids || [];
+                if (uids.length) await user.updateGroup(domainId, name, Array.from(new Set([...current, ...uids])));
             }
         }
         this.response.body.users = udocs;
         this.response.body.messages = messages;
     }
 }
+/* eslint-enable no-await-in-loop */
 
-async function apply() {
-    Route('manage', '/manage', SystemMainHandler);
-    Route('manage_dashboard', '/manage/dashboard', SystemDashboardHandler);
-    Route('manage_script', '/manage/script', SystemScriptHandler);
-    Route('manage_setting', '/manage/setting', SystemSettingHandler);
-    Route('manage_setting_schema', '/manage/setting/schema.json', SystemSettingSchemaHandler);
-    Route('manage_user_import', '/manage/userimport', SystemUserImportHandler);
-    Connection('manage_check', '/manage/check-conn', SystemCheckConnHandler);
+const Priv = omit(PRIV, ['PRIV_DEFAULT', 'PRIV_NEVER', 'PRIV_NONE', 'PRIV_ALL']);
+const allPriv = Math.sum(Object.values(Priv));
+
+class SystemUserPrivHandler extends SystemHandler {
+    @requireSudo
+    @param('extraIgnore', Types.NumericArray, true)
+    async get({ }, extraIgnore: number[] = []) {
+        const defaultPriv = system.get('default.priv');
+        const udocs = await user.getMulti({
+            _id: { $gte: -1000, $ne: 1 }, priv: { $nin: [0, defaultPriv, ...extraIgnore] },
+        }).limit(1000).sort({ _id: 1 }).toArray();
+        const banudocs = await user.getMulti({ _id: { $gte: -1000, $ne: 1 }, priv: 0 }).limit(1000).sort({ _id: 1 }).toArray();
+        this.response.body = {
+            udocs: [...udocs, ...banudocs],
+            defaultPriv,
+            Priv,
+        };
+        this.response.pjax = 'partials/manage_user_priv.html';
+        this.response.template = 'manage_user_priv.html';
+    }
+
+    @requireSudo
+    @param('uid', Types.Int)
+    @param('priv', Types.UnsignedInt)
+    @param('system', Types.Boolean)
+    async post(domainId: string, uid: number, priv: number, editSystem: boolean) {
+        if (!editSystem) {
+            const udoc = await user.getById(domainId, uid);
+            if (!udoc) throw new UserNotFoundError(uid);
+            if (udoc.priv === -1 || priv === -1 || priv === allPriv) throw new CannotEditSuperAdminError();
+            await user.setPriv(uid, priv);
+        } else {
+            const defaultPriv = system.get('default.priv');
+            await user.coll.updateMany({ priv: defaultPriv }, { $set: { priv } });
+            await system.set('default.priv', priv);
+            this.ctx.broadcast('user/delcache', true);
+        }
+        this.back();
+    }
 }
 
-global.Hydro.handler.manage = apply;
+export const inject = ['setting', 'check'];
+export async function apply(ctx) {
+    ctx.Route('manage', '/manage', SystemMainHandler);
+    ctx.Route('manage_dashboard', '/manage/dashboard', SystemDashboardHandler);
+    ctx.Route('manage_script', '/manage/script', SystemScriptHandler);
+    ctx.Route('manage_setting', '/manage/setting', SystemSettingHandler);
+    ctx.Route('manage_config', '/manage/config', SystemConfigHandler);
+    ctx.Route('manage_user_import', '/manage/userimport', SystemUserImportHandler);
+    ctx.Route('manage_user_priv', '/manage/userpriv', SystemUserPrivHandler);
+    ctx.Connection('manage_check', '/manage/check-conn', SystemCheckConnHandler);
+}

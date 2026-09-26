@@ -1,10 +1,9 @@
 /* eslint-disable no-await-in-loop */
+import Schema from 'schemastery';
 import * as semver from 'semver';
 import superagent from 'superagent';
 import MessageModel from '../model/message';
-import * as system from '../model/system';
-
-export const description = 'Daily update check';
+import system from '../model/system';
 
 async function getRemoteVersion(id: string) {
     try {
@@ -15,7 +14,7 @@ async function getRemoteVersion(id: string) {
     }
 }
 
-export async function run(_: {}, report: Function) {
+export async function run(_: void, report: (data: any) => void) {
     const current = global.Hydro.version;
     const message = [''];
     for (const name in current) {
@@ -38,6 +37,4 @@ export async function run(_: {}, report: Function) {
     return true;
 }
 
-export const validate = {};
-
-global.Hydro.script.checkUpdate = { run, description, validate };
+export const apply = (ctx) => ctx.addScript('checkUpdate', 'Daily update check', Schema.any(), run);

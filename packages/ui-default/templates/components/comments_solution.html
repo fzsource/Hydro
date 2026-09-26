@@ -54,7 +54,6 @@
             <input type="button" class="rounded button nojs--hide" name="dczcomments__box__cancel" value="{{ _('Cancel') }} (Esc)">
           </div>
           <input type="hidden" name="operation" value="{{ comment_post_op }}">
-          <input type="hidden" name="csrfToken" value="{{ handler.csrfToken }}">
         </form>
       </div>
       <div class="nojs--hide">
@@ -87,20 +86,11 @@
       <div class="vote vote--discussion">
       {% if handler.user.hasPerm(perm.PERM_VOTE_PROBLEM_SOLUTION) %}
         <div class="vote-number rotator--enabled">{{ doc.vote }}</div>
-        <div class="vote-op clearfix">
-          <form method="post">
-            <input type="hidden" name="operation" value="upvote">
-            <input type="hidden" name="psid" value="{{ doc._id }}">
-            <input type="hidden" name="csrfToken" value="{{ handler.csrfToken }}">
-            <button type="submit" class="vote-button upvote{% if pssdict[doc._id].vote == 1 %} active{% endif %}" data-tooltip="{{ _('Upvote') }}" data-tooltip-pos="bottom center" aria-label="{{ _('Upvote') }}"><span class="icon icon-vote--up"></span></button>
-          </form>
-          <form method="post">
-            <input type="hidden" name="operation" value="downvote">
-            <input type="hidden" name="psid" value="{{ doc._id }}">
-            <input type="hidden" name="csrfToken" value="{{ handler.csrfToken }}">
-            <button type="submit" class="vote-button downvote{% if pssdict[doc._id].vote == -1 %} active{% endif %}" data-tooltip="{{ _('Downvote') }}" data-tooltip-pos="bottom center" aria-label="{{ _('Downvote') }}"><span class="icon icon-vote--down"></span></button>
-          </form>
-        </div>
+        <form method="post" class="vote-op clearfix">
+          <input type="hidden" name="psid" value="{{ doc._id }}">
+          <button type="submit" name="operation" value="upvote" class="vote-button upvote{% if pssdict[doc._id].vote == 1 %} active{% endif %}" data-tooltip="{{ _('Upvote') }}" data-tooltip-pos="bottom center" aria-label="{{ _('Upvote') }}"><span class="icon icon-vote--up"></span></button>
+          <button type="submit" name="operation" value="downvote" class="vote-button downvote{% if pssdict[doc._id].vote == -1 %} active{% endif %}" data-tooltip="{{ _('Downvote') }}" data-tooltip-pos="bottom center" aria-label="{{ _('Downvote') }}"><span class="icon icon-vote--down"></span></button>
+        </form>
       {% else %}
         <div class="vote-number">{{ doc.vote }}</div>
       {% endif %}
@@ -112,6 +102,11 @@
           {{ user.render_inline(udoc) }} @ {{ datetimeSpan(doc._id)|safe }}
         </div>
         <div class="dczcomments__operations nojs--hide">
+        {% if pdoc %}
+          <a href="javascript:;" data-tooltip="{{ _('Copy Link') }}" data-copylink="{{ url('problem_solution_detail', pid=pdoc.pid|default(pdoc.docId), sid=doc._id) }}">
+            <span class="icon icon-link"></span>
+          </a>
+        {% endif %}
         {% if handler.user.hasPerm(reply_post_perm) %}
           <a href="javascript:;" data-tooltip="{{ _('Reply') }}" data-op="reply" data-type="comment" 
             data-form="{{ {operation: reply_post_op, psid: doc._id}|json }}"
@@ -129,7 +124,7 @@
         {% endif %}
         </div>
       </div>
-      <div class="typo" data-emoji-enabled data-raw-url="{{ url('problem_solution_raw', pid=doc.parentId, psid=doc._id) }}">
+      <div class="typo richmedia collapsible-content" data-emoji-enabled data-raw-url="{{ url('problem_solution_raw', pid=doc.parentId, psid=doc._id) }}">
         {{ doc['content']|markdown|safe }}
       </div>
       <div class="commentbox-edit-target"></div>
@@ -147,19 +142,19 @@
                 {% if handler.user.hasPerm(reply_post_perm) %}
                   <a href="javascript:;" data-tooltip="{{ _('Reply') }}" data-op="reply" data-type="reply"><span class="icon icon-reply"></span></a>
                 {% endif %}
-                {% if (handler.user.hasPerm(reply_edit_self_perm) and handler.user.own(doc)) or handler.user.hasPerm(reply_edit_perm) %}
+                {% if (handler.user.hasPerm(reply_edit_self_perm) and handler.user.own(rdoc)) or handler.user.hasPerm(reply_edit_perm) %}
                   <a href="javascript:;" data-tooltip="{{ _('Edit') }}" data-op="edit" data-type="reply"
                     data-form="{{ {operation: reply_edit_op, psid: doc._id, psrid: rdoc._id}|json }}"
                   ><span class="icon icon-edit"></span></a>
                 {% endif %}
-                {% if (handler.user.hasPerm(reply_delete_self_perm) and handler.user.own(doc)) or handler.user.hasPerm(reply_delete_perm) %}
+                {% if (handler.user.hasPerm(reply_delete_self_perm) and handler.user.own(rdoc)) or handler.user.hasPerm(reply_delete_perm) %}
                   <a href="javascript:;" data-tooltip="{{ _('Delete') }}" data-op="delete" data-type="reply"
                     data-form="{{ {operation: reply_delete_op, psid: doc._id, psrid: rdoc._id}|json }}"
                   ><span class="icon icon-delete"></span></a>
                 {% endif %}
                 </div>
               </div>
-              <div class="typo" data-emoji-enabled data-raw-url="{{ url('problem_solution_reply_raw', pid=doc.parentId, psid=doc._id, psrid=rdoc._id) }}">
+              <div class="typo richmedia collapsible-content" data-emoji-enabled data-raw-url="{{ url('problem_solution_reply_raw', pid=doc.parentId, psid=doc._id, psrid=rdoc._id) }}">
                 {{ rdoc['content']|markdown|safe }}
               </div>
               <div class="commentbox-edit-target"></div>

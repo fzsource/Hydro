@@ -1,7 +1,7 @@
-{%- macro nav_item(target_page_name, target_page_args, target_page_prefix) -%}
+{%- macro nav_item(item) -%}
 <li class="nav__list-item">
-  <a href="{{ url(target_page_name, target_page_args) }}" class="nav__item{% if page_name.startsWith(target_page_prefix) %} nav--active{% endif %}">
-    {{ _(target_page_name) }}
+  <a href="{{ url(item.name, item.args, query=item.args.query(handler) if typeof(item.args.query) == 'function' else item.args.query or {}) }}" class="nav__item{% if page_name.startsWith(item.args.prefix) %} nav--active{% endif %}">
+    {{ _(item.displayName or item.name) }}
   </a>
 </li>
 {%- endmacro -%}
@@ -9,16 +9,20 @@
 <nav class="nav slideout-menu" id="menu">
   <div class="row"><div class="columns clearfix">
     <ol class="nav__list nav__list--main clearfix">
-      <li class="nav__list-item"><a href="/" class="nav__logo" style="background-size: 100% 100%;">&nbsp;</a></li>
-      {%- for item in ui.nodes.nav -%}{% if item.checker(handler) %}
-        {{ nav_item(item.name, item.args(handler), item.prefix) }}
+      <li class="nav__list-item">
+        <a href="/"><img class="nav__logo" src="{{ ctx.setting.get('ui-default.nav_logo_dark') }}"></a>
+      </li>
+      {%- for item in overrideNav|default(ui.getNodes('Nav')) -%}{% if item.checker(handler) %}
+        {{ nav_item(item) }}
       {% endif %}{%- endfor -%}
     </ol>
     <ol class="nav__list nav__list--secondary clearfix">
     {% if not handler.user.hasPriv(PRIV.PRIV_USER_PROFILE) %}
       <li class="nav__list-item"><a href="{{ url('user_login') }}" class="nav__item" name="nav_login">{{ _('Login') }}</a></li>
+      {% if handler.user.hasPriv(PRIV.PRIV_REGISTER_USER) and model.system.get('server.login') %}
       <li class="nav__list-item"><a href="{{ url('user_register') }}" class="nav__item--round">{{ _('Sign Up') }}</a></li>
-      <li class="nav__list-item" data-dropdown-pos="bottom right" data-dropdown-custom-class="nav__dropdown" data-dropdown-target="#menu-nav-user" data-dropdown-disabledconstrainToWindow data-dropdown-trigger-desktop-only>
+      {% endif %}
+      <li class="nav__list-item nojs--hide" data-dropdown-pos="bottom right" data-dropdown-custom-class="nav__dropdown" data-dropdown-target="#menu-nav-user" data-dropdown-disabledconstrainToWindow data-dropdown-trigger-desktop-only>
         <a href="javascript:;" class="nav__item">
           <span class="icon icon-global"></span>Language <span class="icon icon-expand_more"></span>
         </a>
@@ -29,8 +33,31 @@
         </ol>
       </li>
     {% else %}
+    {% if model.system.get('ui-default.domainNavigation') %}
+      <li class="nav__list-item" data-dropdown-pos="bottom right" data-dropdown-custom-class="nav__dropdown" data-dropdown-target="#menu-nav-domain" data-dropdown-disabledconstrainToWindow data-dropdown-trigger-desktop-only>
+        <span class="nav__item"><span class="icon"><img class="small user-profile-avatar v-center" loading="lazy" src="{{ avatarUrl(handler.domain.avatar|default('')) }}" width="20" height="20"></span> {{ handler.domain.name }} <span class="icon icon-expand_more nojs--hide"></span></span>
+        <ol class="dropdown-target menu" id="menu-nav-domain">
+          {%- if handler.user.domains|length -%}
+          {%- for ddoc in handler.user.domains -%}
+            <li class="menu__item">
+              <a href="{{ url('homepage', domainId=ddoc['_id']) }}" class="menu__link">
+                <span class="icon"><img class="small user-profile-avatar v-center" loading="lazy" src="{{ avatarUrl(ddoc.avatar|default('')) }}" width="20" height="20"></span>
+                {{ ddoc['name'] }}{% if ddoc['name'] != ddoc['_id']%} ({{ ddoc['_id'] }}){% endif %}
+              </a>
+            </li>
+          {%- endfor -%}
+          <li class="menu__seperator"></li>
+          {%- endif -%}
+          <li class="menu__item">
+            <a href="{{ url('home_domain') }}" class="menu__link">
+              <span class="icon icon-wrench"></span> {{ _('Manage') }}
+            </a>
+          </li>
+        </ol>
+      </li>
+    {% endif %}
       <li class="nav__list-item" data-dropdown-pos="bottom right" data-dropdown-custom-class="nav__dropdown" data-dropdown-target="#menu-nav-user" data-dropdown-disabledconstrainToWindow data-dropdown-trigger-desktop-only>
-        <a href="{{ url('user_detail', uid=handler.user._id) }}" class="nav__item">{{ handler.user.uname }} <span class="icon icon-expand_more nojs--hide"></span></a>
+        <a href="{{ url('user_detail', uid=handler.user._id) }}" class="nav__item">{% if handler.user.displayName and handler.user.displayName != handler.user.uname %}{{ handler.user.displayName }} ({{ handler.user.uname }}){% else %}{{ handler.user.uname }}{% endif %} <span class="icon icon-expand_more nojs--hide"></span></a>
         <ol class="dropdown-target menu" id="menu-nav-user">
           <li class="menu__item">
             <a href="{{ url('user_detail', uid=handler.user._id) }}" class="menu__link">
@@ -77,12 +104,17 @@
               </a>
             </li>
           {% endif %}
-          {% if handler.user.hasPriv(PRIV.PRIV_USER_PROFILE) and model.system.get('server.blog') %}
-            <li class="menu__item">
-              <a href="{{ url('blog_main', uid=handler.user._id) }}" class="menu__link">
-                <span class="icon icon-book"></span> {{ _('Blog') }}
+          {% if ui.getNodes('UserDropdown').length %}
+            <li class="menu__seperator"></li>
+            {%- for item in ui.getNodes('UserDropdown') -%} {% if item.checker(handler) %}
+            <li class="menu__item nojs--hide">
+              {% set args = (item.args(handler) if typeof(item.args)=='function' else item.args) or {} %}
+              <a href="{{ url(item.name, args) }}" class="menu__link">
+                <span class="icon icon-{{ args.icon }}"></span> {{ _(args.displayName or item.name) }}
               </a>
             </li>
+            {% endif %}
+            {%- endfor -%}
           {% endif %}
           <li class="menu__seperator"></li>
           {% if handler.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) %}

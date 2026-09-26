@@ -1,18 +1,23 @@
-/* eslint-disable import/no-dynamic-require */
-/* eslint-disable no-await-in-loop */
+import os from 'os';
+import path from 'path';
+import readline from 'readline/promises';
 import cac from 'cac';
-import { ObjectID } from 'mongodb';
-import { validate } from '../lib/validator';
-import options from '../options';
-import * as bus from '../service/bus';
-import db from '../service/db';
+import fs from 'fs-extra';
+import { ObjectId } from 'mongodb';
+import { parse, type ParseEntry } from 'shell-quote';
+import { Context } from '../context';
+import SystemModel from '../model/system';
+import { load as loadOptions } from '../options';
+import { MongoService } from '../service/db';
+import { SettingService } from '../settings';
 import {
-    lib, model, script, service,
+    addon, builtinModel, locale, model, service,
 } from './common';
 
 const argv = cac().parse();
-const COMMENTS = /((\/\/.*$)|(\/\*[\s\S]*?\*\/))/mg;
-const ARR = /=>.*$/mg;
+const tmpdir = path.resolve(os.tmpdir(), 'hydro');
+const COMMENTS = /((\/\/.*$)|(\/\*[\s\S]*?\*\/))/gm;
+const ARR = /=>.*$/gm;
 function parseParameters(fn: Function) {
     const code = fn.toString()
         .replace(COMMENTS, '')
@@ -23,13 +28,35 @@ function parseParameters(fn: Function) {
 }
 
 async function runScript(name: string, arg: any) {
-    if (!global.Hydro.script[name]) return console.error('Script %s not found.', name);
-    validate(global.Hydro.script[name].validate, arg);
-    return await global.Hydro.script[name].run(arg, console.info);
+    const s = global.Hydro.script[name];
+    if (!s) return console.error('Script %s not found.', name);
+    if (typeof s.validate === 'function') arg = s.validate(arg);
+    return await s.run(arg, console.info);
 }
 
-async function cli() {
-    const [, modelName, func, ...args] = argv.args as [string, string, string, ...any[]];
+function checkStringArray(args: ParseEntry[]): args is string[] {
+    return args.every((arg) => typeof arg === 'string');
+}
+
+function parseInteractiveArgv(line: string) {
+    const args = parse(line);
+    if (!checkStringArray(args)) throw new Error('Shell operators are not supported in interactive mode.');
+    if (args[0] === 'hydrooj') args.shift();
+    if (args[0] === 'cli') args.shift();
+    return cac().parse(['node', 'hydrooj', 'cli', ...args], { run: false });
+}
+
+async function cli(commandArgv = argv) {
+    const [, modelName, func, ...args] = commandArgv.args as [string, string, string, ...any[]];
+    if (modelName === 'execute') {
+        try {
+            // eslint-disable-next-line no-eval
+            const res = eval(`(async () => { with (require('${require.resolve('../plugin-api')}')) { ${func} } })`);
+            return console.log(await res());
+        } catch (e) {
+            console.error(`Execution fail: ${e.message}`);
+        }
+    }
     if (modelName === 'script') {
         let arg: any;
         console.log(args.join(' '));
@@ -64,14 +91,25 @@ async function cli() {
         return console.error(parameters.join(', '));
     }
     for (let i = 0; i < args.length; i++) {
-        if ("'\"".includes(args[i][0]) && "'\"".includes(args[i][args[i].length - 1])) {
+        if ("'\"".includes(args[i][0]) && "'\"".includes(args[i].at(-1))) {
             args[i] = args[i].substr(1, args[i].length - 2);
-        } else if (args[i].length === 24 && ObjectID.isValid(args[i])) {
-            args[i] = new ObjectID(args[i]);
+        } else if (args[i].length === 24 && ObjectId.isValid(args[i])) {
+            args[i] = new ObjectId(args[i]);
         } else if ((+args[i]).toString() === args[i]) {
             args[i] = +args[i];
         } else if (args[i].startsWith('~')) {
-            args[i] = argv.options[args[i].substr(1)];
+            args[i] = commandArgv.options[args[i].substr(1)];
+        } else if ((args[i].startsWith('[') && args[i].endsWith(']')) || (args[i].startsWith('{') && args[i].endsWith('}'))) {
+            try {
+                args[i] = JSON.parse(args[i]);
+                for (const key in args[i]) {
+                    if (typeof args[i][key] === 'string' && ObjectId.isValid(args[i][key])) {
+                        args[i][key] = new ObjectId(args[i][key]);
+                    }
+                }
+            } catch (e) {
+                console.error(`Cannot parse argument at position ${i}`);
+            }
         }
     }
     let result = global.Hydro.model[modelName][func](...args);
@@ -79,26 +117,60 @@ async function cli() {
     return console.log(result);
 }
 
-export async function load() {
-    const pending = global.addons;
-    const fail = [];
-    require('../lib/i18n');
+export async function load(ctx: Context) {
+    fs.ensureDirSync(tmpdir);
     require('../utils');
     require('../error');
-    require('../options');
-    const opts = options();
-    await db.start(opts);
-    const storage = require('../service/storage');
-    await storage.start();
+    require('../service/bus').apply(ctx);
+    const pending = global.addons;
+    const fail = [];
+    await locale(pending, fail);
+    await ctx.plugin(MongoService, loadOptions() || {});
+    await ctx.plugin(SettingService);
+    await ctx.plugin(SystemModel.Service);
+    ctx = await new Promise((resolve) => {
+        ctx.inject(['loader', 'setting', 'db', 'model:system'], (c) => {
+            resolve(c);
+        });
+    });
+    await Promise.all([
+        ctx.loader.reloadPlugin(require.resolve('../service/storage'), 'file'),
+        ctx.loader.reloadPlugin(require.resolve('../service/worker'), 'worker'),
+        ctx.loader.reloadPlugin(require.resolve('../service/server'), 'server'),
+    ]);
     require('../lib/index');
-    await lib(pending, fail);
-    const systemModel = require('../model/system');
-    await systemModel.runConfig();
-    await service(pending, fail);
-    require('../model/index');
-    await model(pending, fail);
-    require('../script/index');
-    await script(pending, fail, []);
-    await bus.parallel('app/started');
-    await cli();
+    await service(pending, fail, ctx);
+    await builtinModel(ctx);
+    await model(pending, fail, ctx);
+    ctx = await new Promise((resolve) => {
+        ctx.inject(['server', 'worker'], (c) => {
+            resolve(c);
+        });
+    });
+    await addon(pending, fail, ctx);
+    const scriptDir = path.resolve(__dirname, '..', 'script');
+    await Promise.all((await fs.readdir(scriptDir))
+        .map((h) => ctx.loader.reloadPlugin(path.resolve(scriptDir, h), '')));
+    if (argv.args.length > 1) {
+        await cli();
+        return;
+    }
+    const rl = readline.createInterface(process.stdin, process.stdout);
+    console.log('Hydro CLI interactive mode. Type `exit` or press Ctrl+D to exit.');
+    try {
+        while (true) {
+            const line = await rl.question('hydrooj> '); // eslint-disable-line no-await-in-loop
+            if (!line.trim()) continue;
+            if (['exit', 'quit'].includes(line.trim())) break;
+            try {
+                await cli(parseInteractiveArgv(line)); // eslint-disable-line no-await-in-loop
+            } catch (e) {
+                console.error(e.message);
+            }
+        }
+    } catch (e) {
+        if (e?.code !== 'ERR_USE_AFTER_CLOSE') console.error(e);
+    } finally {
+        rl.close();
+    }
 }
